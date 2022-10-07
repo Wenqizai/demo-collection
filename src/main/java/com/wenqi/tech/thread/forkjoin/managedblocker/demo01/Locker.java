@@ -1,4 +1,4 @@
-package com.wenqi.tech.thread.forkjoin.managedblocker;
+package com.wenqi.tech.thread.forkjoin.managedblocker.demo01;
 
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.locks.ReentrantLock;

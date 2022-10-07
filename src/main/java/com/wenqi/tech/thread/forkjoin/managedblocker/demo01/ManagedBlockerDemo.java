@@ -1,4 +1,4 @@
-package com.wenqi.tech.thread.forkjoin.managedblocker;
+package com.wenqi.tech.thread.forkjoin.managedblocker.demo01;
 
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;

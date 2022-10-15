@@ -1,10 +1,7 @@
-package com.wenqi.string;
+package com.wenqi.example.string;
 
-
-import org.apache.commons.lang3.RandomUtils;
 
 import java.util.concurrent.BrokenBarrierException;
-import java.util.concurrent.CyclicBarrier;
 
 /**
  * @author liangwenqi

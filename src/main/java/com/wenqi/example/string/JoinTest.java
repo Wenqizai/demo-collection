@@ -1,4 +1,4 @@
-package com.wenqi.string;
+package com.wenqi.example.string;
 
 import com.google.common.collect.Lists;
 import org.apache.commons.lang3.StringUtils;

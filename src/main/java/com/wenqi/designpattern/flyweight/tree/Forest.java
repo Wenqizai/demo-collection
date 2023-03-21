@@ -1,4 +1,4 @@
-package com.wenqi.designpattern.fylweight;
+package com.wenqi.designpattern.flyweight.tree;
 
 import javax.swing.JFrame;
 import java.awt.Color;

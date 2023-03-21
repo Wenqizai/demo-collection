@@ -1,4 +1,4 @@
-package com.wenqi.designpattern.fylweight;
+package com.wenqi.designpattern.flyweight.tree;
 
 import java.awt.Graphics;
 

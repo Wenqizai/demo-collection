@@ -29,6 +29,18 @@
         </environment>
     </environments>
 
+    <!-- 未指定property属性时， databaseId通过方法DatabaseMetaData#getDatabaseProductName()获取 -->
+    <!-- 主要是通过Connection的metadata中获取 -->
+    <!-- 指定属性时， databaseId上述方法获取到，通常情况下这些字符串都非常长，而且相同产品的不同版本会返回不同的值 -->
+    <!-- 这时，我们可以通过设置属性别名来使其变短 -->
+    <!-- 如果属性name不匹配时，databaseId返回null -->
+    <databaseIdProvider type="DB_VENDOR">
+        <property name="MySQL" value="mysql"/>
+        <property name="SQL Server" value="sqlserver"/>
+        <property name="DB2" value="db2"/>
+        <property name="Oracle" value="oracle" />
+    </databaseIdProvider>
+
     <!-- 定义映射器 -->
     <mappers>
         <mapper resource="mybatis/RoleMapper.xml"/>

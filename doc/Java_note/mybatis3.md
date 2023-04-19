@@ -294,10 +294,13 @@ public class VendorDatabaseIdProvider implements DatabaseIdProvider {
 ```xml
 <!-- 4个互斥的，贪方便的写法 -->
 <mappers>
+    <!-- 针对xml使用 -->
     <!-- 使用相对于类路径的资源引用 -->
     <mapper resource="org/mybatis/builder/AuthorMapper.xml"/>
     <!-- 使用完全限定资源定位符（URL） -->
     <mapper url="file:///var/mappers/AuthorMapper.xml"/>
+    
+    <!-- 针对mapper使用注解使用 -->
     <!-- 使用映射器接口实现类的完全限定类名 -->
     <mapper class="org.mybatis.builder.AuthorMapper"/>
     <!-- 将包内的映射器接口全部注册为映射器 -->
@@ -349,6 +352,8 @@ private void mapperElement(XNode parent) throws Exception {
     }
 }
 ```
+
+## XMLMapperBuilder
 
 
 

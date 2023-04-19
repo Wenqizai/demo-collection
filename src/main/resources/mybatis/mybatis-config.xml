@@ -43,7 +43,8 @@
 
     <!-- 定义映射器 -->
     <mappers>
-        <mapper resource="mybatis/RoleMapper.xml"/>
+<!--        <mapper resource="mybatis/RoleMapper.xml"/>-->
+        <package name="com.wenqi.test.mybatis"/>
     </mappers>
 
 </configuration>

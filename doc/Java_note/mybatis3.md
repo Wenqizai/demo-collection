@@ -355,9 +355,189 @@ private void mapperElement(XNode parent) throws Exception {
 
 ## XMLMapperBuilder
 
+XMLMapperBuilder：主要负责解析mybatis-config.xml配置文件中配置的\<mapper>标签定义，负责找到对应的Mapper和Mapper.xml并加载解析。核心方法：`org.apache.ibatis.builder.xml.XMLMapperBuilder#parse`
 
+```java
+public class XMLMapperBuilder extends BaseBuilder {
+    public void parse() {
+        // 是否已经加载过该配置文件
+        if (!configuration.isResourceLoaded(resource)) {
+            // 解析 <mapper>节点
+            configurationElement(parser.evalNode("/mapper"));
+            // 将 resource 添加到 configuration 的 loadedResources属性中，
+            // 该属性是一个 HashSet<String>类型的集合，其中记录了已经加载过的映射文件
+            configuration.addLoadedResource(resource);
+            // 注册 Mapper接口
+            bindMapperForNamespace();
+        }
+        // 处理 configurationElement()方法 中解析失败的 <resultMap>节点
+        parsePendingResultMaps();
+        // 处理 configurationElement()方法 中解析失败的 <cacheRef>节点
+        parsePendingCacheRefs();
+        // 处理 configurationElement()方法 中解析失败的 <statement>节点
+        parsePendingStatements();
+    }
 
+    // 解析xml sql映射放到configuration
+    private void configurationElement(XNode context) {
+        try {
+            // 获取 <mapper>节点 的 namespace属性
+            String namespace = context.getStringAttribute("namespace");
+            if (namespace == null || namespace.equals("")) {
+                throw new BuilderException("Mapper's namespace cannot be empty");
+            }
+            // 使用 MapperBuilderAssistant对象 的 currentNamespace属性 记录 namespace命名空间
+            builderAssistant.setCurrentNamespace(namespace);
+            // 解析 <cache-ref>节点，后面的解析方法 也都见名知意
+            cacheRefElement(context.evalNode("cache-ref"));
+            cacheElement(context.evalNode("cache"));
+            parameterMapElement(context.evalNodes("/mapper/parameterMap"));
+            // *解析resultMap标签
+            resultMapElements(context.evalNodes("/mapper/resultMap"));
+            // *解析sql id标签
+            sqlElement(context.evalNodes("/mapper/sql"));
+            // *解析sql statement标签
+            buildStatementFromContext(context.evalNodes("select|insert|update|delete"));
+        } catch (Exception e) {
+            throw new BuilderException("Error parsing Mapper XML. The XML location is '" + resource + "'. Cause: " + e, e);
+        }
+    }
+}
+```
 
+### \<resultMap>标签
+
+Mybatis 通过\<resultMap>节点定义了ORM 规则，建立了业务成DTO与数据库column的映射关系，减少重复代码，提高开发效率。通过解析\<resultMap>标签，将解析结果存入`org.apache.ibatis.mapping.ResultMap`中，其中保存映射关系的类是`org.apache.ibatis.mapping.ResultMapping`。
+
+解析方法：`org.apache.ibatis.builder.xml.XMLMapperBuilder#resultMapElement(org.apache.ibatis.parsing.XNode, java.util.List<org.apache.ibatis.mapping.ResultMapping>, java.lang.Class<?>)`
+
+> ResultMap
+
+```java
+public class ResultMap {
+    private Configuration configuration;
+    // <resultMap> 中的id属性, 唯一
+    private String id;
+    private Class<?> type;
+    // 记录了除 <discriminator>节点 之外的其它映射关系(即，ResultMapping对象集合)
+    private List<ResultMapping> resultMappings;
+    // 记录了映射关系中带有 ID标志 的映射关系，如：<id>节点 和 <constructor>节点 的 <idArg>子节点
+    private List<ResultMapping> idResultMappings;
+    // 记录了映射关系中带有 Constructor标志 的映射关系，如：<constructor>所有子元素
+    private List<ResultMapping> constructorResultMappings;
+    // 记录了映射关系中不带有 Constructor标志 的映射关系
+    private List<ResultMapping> propertyResultMappings;
+    // 记录了所有映射关系中涉及的 column属性 的集合
+    private Set<String> mappedColumns;
+    // 记录了所有映射关系中涉及的 property属性 的集合
+    private Set<String> mappedProperties;
+    // 鉴别器，对应 <discriminator>节点
+    private Discriminator discriminator;
+    // 是否含有嵌套的结果映射，如果某个映射关系中存在 resultMap属性，
+    // 且不存在 resultSet属性，则为true
+    private boolean hasNestedResultMaps;
+    // 是否含有嵌套查询，如果某个属性映射存在 select属性，则为true
+    private boolean hasNestedQueries;
+    // 是否开启自动映射
+    private Boolean autoMapping;
+}
+```
+
+> ResultMapping
+
+```java
+public class ResultMapping {
+    private Configuration configuration;
+    // 对应节点的 property属性，表示该列进行映射的属性
+    private String property;
+    // 对应节点的 column属性，表示从数据库中得到的列名或列名的别名
+    private String column;
+    // 表示 一个 JavaBean 的完全限定名，或一个类型别名
+    private Class<?> javaType;
+    // 进行映射列的 JDBC类型
+    private JdbcType jdbcType;
+    // 类型处理器
+    private TypeHandler<?> typeHandler;
+    // 该属性通过 id 引用了另一个 <resultMap>节点，它负责将结果集中的一部分列映射成
+    // 它所关联的结果对象。这样我们就可以通过 join方式 进行关联查询，然后直接映射成
+    // 多个对象，并同时设置这些对象之间的组合关系(nested嵌套的)
+    private String nestedResultMapId;
+    // 该属性通过 id 引用了另一个 <select>节点，它会把指定的列值传入 select属性 指定的
+    // select语句 中作为参数进行查询。使用该属性可能会导致 ORM 中的 N+1问题，请谨慎使用
+    private String nestedQueryId;
+    private Set<String> notNullColumns;
+    private String columnPrefix;
+    // 处理后的标志，共有两个：id 和 constructor
+    private List<ResultFlag> flags;
+    private List<ResultMapping> composites;
+    private String resultSet;
+    private String foreignColumn;
+    // 是否延迟加载
+    private boolean lazy;
+}
+```
+
+> \<resultMap>标签解析方法resultMapElement
+
+最后调用方法buildResultMappingFromContext：主要是解析\<resultMap>下的子标签，构建每一个ResultMapping返回。
+
+当构建完 ResultMapping 对象集合之后，会调用 `resultMapResolver.resolve();`，该方法会调用 MapperBuilderAssistant 的 addResultMap()方法 创建 ResultMap 对象，并添加到 Configuration 的 resultMaps 集合中保存，最终完成\<resultMap>标签的解析构建过程。
+
+```java
+private ResultMap resultMapElement(XNode resultMapNode) {
+    return resultMapElement(resultMapNode, Collections.emptyList(), null);
+}
+
+private ResultMap resultMapElement(XNode resultMapNode, List<ResultMapping> additionalResultMappings, Class<?> enclosingType) {
+    ErrorContext.instance().activity("processing " + resultMapNode.getValueBasedIdentifier());
+    // type属性，表示结果集将被映射成 type 指定类型的对象
+    // type属性要么指定全类名，要么建立Alias
+    String type = resultMapNode.getStringAttribute("type",
+                                                   resultMapNode.getStringAttribute("ofType",
+                                                                                    resultMapNode.getStringAttribute("resultType",
+                                                                                                                     resultMapNode.getStringAttribute("javaType"))));
+    // 解析type指定的Class类型
+    Class<?> typeClass = resolveClass(type);
+    if (typeClass == null) {
+        // 处理子标签中<association>没有指定resultType或resultMap的对象映射
+        typeClass = inheritEnclosingType(resultMapNode, enclosingType);
+    }
+    Discriminator discriminator = null;
+    List<ResultMapping> resultMappings = new ArrayList<>(additionalResultMappings);
+    // 获取并处理 <resultMap> 的子节点 (id*, result*, association*, collection*, discriminator)
+    List<XNode> resultChildren = resultMapNode.getChildren();
+    for (XNode resultChild : resultChildren) {
+        // 处理 <constructor>节点
+        if ("constructor".equals(resultChild.getName())) {
+            processConstructorElement(resultChild, typeClass, resultMappings);
+            // 处理 <discriminator>节点 根据结果值来决定使用哪个resultMap
+        } else if ("discriminator".equals(resultChild.getName())) {
+            discriminator = processDiscriminatorElement(resultChild, typeClass, resultMappings);
+        } else {
+            // 处理 <id>, <result>, <association>, <collection> 等节点
+            List<ResultFlag> flags = new ArrayList<>();
+            if ("id".equals(resultChild.getName())) {
+                flags.add(ResultFlag.ID);
+            }
+            // 创建 ResultMapping对象，并添加到 resultMappings集合
+            resultMappings.add(buildResultMappingFromContext(resultChild, typeClass, flags));
+        }
+    }
+    String id = resultMapNode.getStringAttribute("id", resultMapNode.getValueBasedIdentifier());
+    // 该属性指定了该 <resultMap>节点 的继承关系
+    String extend = resultMapNode.getStringAttribute("extends");
+    // 为 true 则启动自动映射功能，该功能会自动查找与列明相同的属性名，并调用 setter方法，
+    // 为 false，则需要在 <resultMap>节点 内注明映射关系才会调用对应的 setter方法
+    Boolean autoMapping = resultMapNode.getBooleanAttribute("autoMapping");
+    ResultMapResolver resultMapResolver = new ResultMapResolver(builderAssistant, id, typeClass, extend, discriminator, resultMappings, autoMapping);
+    try {
+        return resultMapResolver.resolve();
+    } catch (IncompleteElementException  e) {
+        configuration.addIncompleteResultMap(resultMapResolver);
+        throw e;
+    }
+}
+```
 
 
 

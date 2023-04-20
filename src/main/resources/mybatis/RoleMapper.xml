@@ -27,4 +27,8 @@
     delete from role where id = #{id}
   </delete>
 
+  <sql id="someCondition">
+    and role_name = ''
+  </sql>
+
 </mapper>

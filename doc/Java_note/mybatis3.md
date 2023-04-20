@@ -46,6 +46,10 @@ public SqlSessionFactory build(Configuration config) {
 }
 ```
 
+> 初始化流程图
+
+![Mybatis初始化](material/Mybatis初始化.png)
+
 ## BaseBuilder
 
 抽象类BaseBuilder定义解析配置文件的方法，并构造配置对象Configuration。BaseBuilder的实现类有：XMLMapperBuilder、XMLConfigBuilder、XMLStatementBuilder等，由他们负责配置文件解析。
@@ -539,9 +543,44 @@ private ResultMap resultMapElement(XNode resultMapNode, List<ResultMapping> addi
 }
 ```
 
+### \<sql>标签
 
+我们再Mapper.xml文件中可以定义sql标签，用于sql statement的拼接。解析sql标签简单来说将解析的sql按照key-value的形式放入` Map<String, XNode> sqlFragments;`Map中，其中key有两种形式：
 
+- Mapper全限定类名.id
+- id
 
+value为整个sql标签。
+
+具体put方法：`org.apache.ibatis.session.Configuration.StrictMap#put`
+
+```java
+private void sqlElement(List<XNode> list) throws Exception {
+    if (configuration.getDatabaseId() != null) {
+        sqlElement(list, configuration.getDatabaseId());
+    }
+    sqlElement(list, null);
+}
+
+private void sqlElement(List<XNode> list, String requiredDatabaseId) throws Exception {
+    // 遍历 <sql>节点
+    for (XNode context : list) {
+        String databaseId = context.getStringAttribute("databaseId");
+        String id = context.getStringAttribute("id");
+        // 为 id 添加命名空间
+        id = builderAssistant.applyCurrentNamespace(id, false);
+        // 检测 <sql> 的 databaseId 与当前 Configuration 中记录的 databaseId 是否一致
+        if (databaseIdMatchesCurrent(id, databaseId, requiredDatabaseId)) {
+            // 记录到 sqlFragments(Map<String, XNode>) 中保存
+            sqlFragments.put(id, context);
+        }
+    }
+}
+```
+
+### XMLStatementBuilder
+
+### MapperAnnotationBuilder
 
 
 

@@ -578,11 +578,122 @@ private void sqlElement(List<XNode> list, String requiredDatabaseId) throws Exce
 }
 ```
 
-### XMLStatementBuilder
+### Mapper绑定
 
-### MapperAnnotationBuilder
+每个映射配置文件 Mapper.xml 的命名空间可以绑定一个 Mapper 接口，并注册到 MapperRegistry 中。执行绑定的方法发生在 Mapper.xml 解析的过程中：`org.apache.ibatis.builder.xml.XMLMapperBuilder#parse`
 
+```java
+public void parse() {
+    if (!configuration.isResourceLoaded(resource)) {
+        configurationElement(parser.evalNode("/mapper"));
+        configuration.addLoadedResource(resource);
+        bindMapperForNamespace();
+    }
+}
+```
 
+其中由 XMLMapperBuilder 的 bindMapperForNamespace()方法中，完成了映射配置文件与对应 Mapper 接口的绑定。
+
+```java
+// 绑定命名空间
+private void bindMapperForNamespace() {
+    // 获取当前映射配置文件的命名空间（<Mapper>是逐一解析的），前面解析Mapper.xml标签时保存的
+    String namespace = builderAssistant.getCurrentNamespace();
+    if (namespace != null) {
+        Class<?> boundType = null;
+        try {
+            // 创建命名空间对应的class
+            boundType = Resources.classForName(namespace);
+        } catch (ClassNotFoundException e) {
+            //ignore, bound type is not required
+        }
+        if (boundType != null) {
+            // mapper还没注册
+            if (!configuration.hasMapper(boundType)) {
+                // Spring may not know the real resource name so we set a flag
+                // to prevent loading again this resource from the mapper interface
+                // look at MapperAnnotationBuilder#loadXmlResource
+                // 追加个 "namespace:" 的前缀，并添加到 Configuration 的 loadedResources 集合中
+                // 这里相当于加一个标志位，防止在addMapper里面再加载一次xml资源
+                configuration.addLoadedResource("namespace:" + namespace);
+                // 添加到 Configuration 的 mapperRegistry 集合中，另外往这个方法栈的更深处看会发现
+                // 其创建了 MapperAnnotationBuilder 对象，并调用了该对象的 parse()方法 解析 Mapper 接口
+                // 这里还用调用 MapperAnnotationBuilder#parse 的原因是兼容xml和注解同时有配置的情况
+                configuration.addMapper(boundType);
+            }
+        }
+    }
+}
+
+public class MapperRegistry {
+    public <T> void addMapper(Class<T> type) {
+        if (type.isInterface()) {
+            if (hasMapper(type)) {
+                throw new BindingException("Type " + type + " is already known to the MapperRegistry.");
+            }
+            boolean loadCompleted = false;
+            try {
+                knownMappers.put(type, new MapperProxyFactory<T>(type));
+                // 解析 Mapper接口 type 中的信息
+                MapperAnnotationBuilder parser = new MapperAnnotationBuilder(config, type);
+                parser.parse();
+                loadCompleted = true;
+            } finally {
+                if (!loadCompleted) {
+                    knownMappers.remove(type);
+                }
+            }
+        }
+    }
+}
+
+public class MapperAnnotationBuilder {
+    public void parse() {
+        String resource = type.toString();
+        // 是否已经加载过该接口
+        if (!configuration.isResourceLoaded(resource)) {
+            // 检查是否加载过该接口对应的映射文件，如果未加载，则创建 XMLMapperBuilder对象
+            // 解析对应的映射文件，该过程就是前面介绍的映射配置文件解析过程
+            loadXmlResource();
+            configuration.addLoadedResource(resource);
+            assistant.setCurrentNamespace(type.getName());
+            // 解析 @CacheNamespace注解
+            parseCache();
+            // 解析 @CacheNamespaceRef注解
+            parseCacheRef();
+            // type接口 的所有方法
+            Method[] methods = type.getMethods();
+            for (Method method : methods) {
+                try {
+                    if (!method.isBridge()) {
+                        // 解析 SelectKey、ResultMap 等注解，并创建 MappedStatement对象
+                        parseStatement(method);
+                    }
+                } catch (IncompleteElementException e) {
+                    // 如果解析过程出现 IncompleteElementException异常，可能是因为引用了
+                    // 未解析的注解，这里将出现异常的方法记录下来，后面提供补偿机制，重新进行解析
+                    configuration.addIncompleteMethod(new MethodResolver(this, method));
+                }
+            }
+        }
+        // 遍历 configuration 中的 incompleteMethods集合，集合中记录了未解析的方法
+        // 重新调用这些方法进行解析
+        parsePendingMethods();
+    }
+}
+```
+
+**问题：假设同时配置了注解和xml怎么办？两者会同时生效么？优先级是怎样的？**
+
+对，同时生效，
+
+## XMLStatementBuilder
+
+待补充。。。
+
+## MapperAnnotationBuilder
+
+待补充。。。
 
 
 

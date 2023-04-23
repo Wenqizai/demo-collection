@@ -685,7 +685,15 @@ public class MapperAnnotationBuilder {
 
 **问题：假设同时配置了注解和xml怎么办？两者会同时生效么？优先级是怎样的？**
 
-对，同时生效，
+1. 对，同时生效，但是同一个方法来说相同属性只会有一个生效（因为采用strictMap，相同key put时会报错！）
+
+2. 对于xml配置来说，先解析xml，后面解析注解配置
+
+   路径：解析Mapper ->  XMLMapperBuilder -> bindMapperForNamespace ->  MapperAnnotationBuilder 
+
+3. 对于注解来说，先解析注解，再解析xml
+
+   路径：mapperRegistry.addMappers -> MapperAnnotationBuilder  -> loadXmlResource
 
 ## XMLStatementBuilder
 

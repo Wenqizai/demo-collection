@@ -2,6 +2,8 @@
 
 官方文档：https://mybatis.org/mybatis-3/zh/getting-started.html
 
+参考blog：https://learn.lianglianglee.com/%E4%B8%93%E6%A0%8F/%E6%B7%B1%E5%85%A5%E5%89%96%E6%9E%90%20MyBatis%20%E6%A0%B8%E5%BF%83%E5%8E%9F%E7%90%86-%E5%AE%8C/00%20%E5%BC%80%E7%AF%87%E8%AF%8D%20%20%E9%A2%86%E7%95%A5%20MyBatis%20%E8%AE%BE%E8%AE%A1%E6%80%9D%E7%BB%B4%EF%BC%8C%E7%AA%81%E7%A0%B4%E6%8C%81%E4%B9%85%E5%8C%96%E6%8A%80%E6%9C%AF%E7%93%B6%E9%A2%88.md
+
 MyBatis都是基于`SqlSessionFactory`实例为核心。`SqlSessionFactory`的实例可以通过 `SqlSessionFactoryBuilder` 获得。而 `SqlSessionFactoryBuilder` 则可以从 XML 配置文件或一个预先配置的`Configuration`实例来构建出`SqlSessionFactory`实例。
 
 > 一些注意点
@@ -9,6 +11,79 @@ MyBatis都是基于`SqlSessionFactory`实例为核心。`SqlSessionFactory`的�
 1. SqlSessionFactoryBuilder仅用来创建SqlSessionFactory，创建完毕可以销毁；
 2. SqlSession线程不安全，注意共享session问题，最佳实践每个方法请求时开启一个SqlSession，方法结束就关闭；
 3. 每个数据库对应一个 SqlSessionFactory 实例；
+
+## 架构
+
+- 架构图
+
+![image-20230424170123990](material/Mybatis架构图.png)
+
+### 基础支撑层
+
+> 类型转换模块
+
+Mybatis是通过操作JDBC来操作数据库，意味着从应用层 -> Mybatis -> JDBC直接的映射关系需要套用一层转换。转换场景主要是：
+
+- SQL绑定传入参数：由Java类型数据转换成JDBC类型数据；
+- 执行结果返回ResultSet，需要将JDBC类型数据转换层Java类型数据。
+
+![image-20230424171158321](material/类型转换模块.png)
+
+> **日志模块**
+
+该模块目前可以集成 Log4j、Log4j2、slf4j 等优秀的日志框架。
+
+> **反射工具模块**
+
+MyBatis 的反射工具箱是在 Java 反射的基础之上进行的一层封装，为上层使用方提供更加灵活、方便的 API 接口，同时缓存 Java 的原生反射相关的元数据，提升了反射代码执行的效率，优化了反射操作的性能。
+
+> **Binding模块**
+
+建立Mapper的绑定映射关系
+
+> **数据源模块**
+
+待补充。。。
+
+
+> **缓存模块**
+
+Mybatis 一、二级缓存
+
+> **解析器模块**
+
+mybatis-config.xml、Mapper.xml
+
+> **事务管理模块**
+
+待补充。。。
+
+### 核心处理层
+
+> **配置解析**
+
+Configuration
+
+> **SQL解析与scripting模块**
+
+主要是sql标签的解析，如\<where>, \<if>, \<foreach>, \<set> 等
+
+> **SQL执行、结果集映射模块**
+
+Executor、StatementHandler、ParameterHandler 和 ResultSetHandler。
+
+![image-20230424175717270](material/SQL语句执行流程.png)
+
+> **插件**
+
+提供扩展接口
+
+### 接口层
+
+**接口层是 MyBatis 暴露给调用的接口集合**，这些接口都是使用 MyBatis 时最常用的一些接口，例如，SqlSession 接口、SqlSessionFactory 接口等。其中，最核心的是 SqlSession 接口，你可以通过它实现很多功能，例如，获取 Mapper 代理、执行 SQL 语句、控制事务开关等。
+
+
+
 
 # 初始化
 

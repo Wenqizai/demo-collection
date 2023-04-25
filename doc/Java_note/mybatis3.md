@@ -37,6 +37,8 @@ Mybatis是通过操作JDBC来操作数据库，意味着从应用层 -> Mybatis 
 
 MyBatis 的反射工具箱是在 Java 反射的基础之上进行的一层封装，为上层使用方提供更加灵活、方便的 API 接口，同时缓存 Java 的原生反射相关的元数据，提升了反射代码执行的效率，优化了反射操作的性能。
 
+反射工具类包：`org.apache.ibatis.reflection`
+
 > **Binding模块**
 
 建立Mapper的绑定映射关系
@@ -82,7 +84,28 @@ Executor、StatementHandler、ParameterHandler 和 ResultSetHandler。
 
 **接口层是 MyBatis 暴露给调用的接口集合**，这些接口都是使用 MyBatis 时最常用的一些接口，例如，SqlSession 接口、SqlSessionFactory 接口等。其中，最核心的是 SqlSession 接口，你可以通过它实现很多功能，例如，获取 Mapper 代理、执行 SQL 语句、控制事务开关等。
 
+## 目录结构
 
+- annotations : 注解，例如`org.apache.ibatis.annotations.Mapper`
+- binding : 数据绑定
+- builder : 构建类
+- cache : 缓存
+- cursor : 游标
+- datasource : 数据源设置
+- exceptions : 异常
+- executor : 执行器
+- io : IO
+- jdbc : JDBC相关
+- lang : JDKversion标记
+- logging : 日志
+- mapping : 映射关系
+- parsing : 解析，xml解析
+- plugin : 插件
+- reflection : 反射工具类
+- scripting : 脚本(sql)组装工具
+- session : 会话
+- transaction : 事务相关内容
+- type : 类型，存放了数据库和JAVA类型之间的关系如`org.apache.ibatis.type.JdbcType`
 
 
 # 初始化
@@ -777,6 +800,10 @@ public class MapperAnnotationBuilder {
 ## MapperAnnotationBuilder
 
 待补充。。。
+
+# 基础支撑层
+
+## 反射
 
 
 

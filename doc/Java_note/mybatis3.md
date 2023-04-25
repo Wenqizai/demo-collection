@@ -805,5 +805,109 @@ public class MapperAnnotationBuilder {
 
 ## 反射
 
+反射工具包：`org.apache.ibatis.reflection`
+
+Reflector，mybatis反射模块的基础。通常需要反射操作一个类时，都会先把Class封装成一个Reflector对象，Reflector中缓存Class的元数据信息。通过Reflector可以更加便利地操作Class的属性和方法。
+
+```java
+public class Reflector {
+    // Reflector缓存的Class元信息，在构造Reflector时完成该属性的填充
+
+    // 传入的Class
+    private final Class<?> type;
+    // Class 可读、可写的属性
+    private final String[] readablePropertyNames;
+    private final String[] writablePropertyNames;
+    // Class setter、getter方法
+    private final Map<String, Invoker> setMethods = new HashMap<>();
+    private final Map<String, Invoker> getMethods = new HashMap<>();
+    // Class 对应的setter的参数类型、getter的return类型
+    // key: 属性  value：参数类型/return类型
+    private final Map<String, Class<?>> setTypes = new HashMap<>();
+    private final Map<String, Class<?>> getTypes = new HashMap<>();
+    // 默认的构造方法
+    private Constructor<?> defaultConstructor;
+    // 所有属性名称的集合，记录到这个集合中的属性名称都是大写的。
+    private Map<String, String> caseInsensitivePropertyMap = new HashMap<>();
+
+    // Reflector的构造方法，完成class的属性
+    public Reflector(Class<?> clazz) {
+        type = clazz;
+        addDefaultConstructor(clazz);
+        addGetMethods(clazz);
+        addSetMethods(clazz);
+        addFields(clazz);
+        readablePropertyNames = getMethods.keySet().toArray(new String[0]);
+        writablePropertyNames = setMethods.keySet().toArray(new String[0]);
+        for (String propName : readablePropertyNames) {
+            caseInsensitivePropertyMap.put(propName.toUpperCase(Locale.ENGLISH), propName);
+        }
+        for (String propName : writablePropertyNames) {
+            caseInsensitivePropertyMap.put(propName.toUpperCase(Locale.ENGLISH), propName);
+        }
+    }
+}
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 

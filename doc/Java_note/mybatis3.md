@@ -805,9 +805,13 @@ public class MapperAnnotationBuilder {
 
 ## 反射
 
+### Reflector
+
 反射工具包：`org.apache.ibatis.reflection`
 
 Reflector，mybatis反射模块的基础。通常需要反射操作一个类时，都会先把Class封装成一个Reflector对象，Reflector中缓存Class的元数据信息。通过Reflector可以更加便利地操作Class的属性和方法。
+
+- 构造器
 
 ```java
 public class Reflector {
@@ -830,7 +834,7 @@ public class Reflector {
     // 所有属性名称的集合，记录到这个集合中的属性名称都是大写的。
     private Map<String, String> caseInsensitivePropertyMap = new HashMap<>();
 
-    // Reflector的构造方法，完成class的属性
+    // Reflector的构造方法，完成class的属性填充
     public Reflector(Class<?> clazz) {
         type = clazz;
         addDefaultConstructor(clazz);
@@ -849,19 +853,97 @@ public class Reflector {
 }
 ```
 
+- addDefaultConstructor
 
+获取所有的构造器，找到空参构造器作为默认构造器
 
+```java
+private void addDefaultConstructor(Class<?> clazz) {
+    Constructor<?>[] constructors = clazz.getDeclaredConstructors();
+    Arrays.stream(constructors).filter(constructor -> constructor.getParameterTypes().length == 0)
+        .findAny().ifPresent(constructor -> this.defaultConstructor = constructor);
+}
+```
 
+- addGetMethods
 
+```java
+private void addGetMethods(Class<?> clazz) {
+    Map<String, List<Method>> conflictingGetters = new HashMap<>();
+    Method[] methods = getClassMethods(clazz);
+    // addMethodConflict: 找到所有的setter方法
+    Arrays.stream(methods).filter(m -> m.getParameterTypes().length == 0 && PropertyNamer.isGetter(m.getName()))
+        .forEach(m -> addMethodConflict(conflictingGetters, PropertyNamer.methodToProperty(m.getName()), m));
+    resolveGetterConflicts(conflictingGetters);
+}
+```
 
+### Invoker
 
+Reflector在构造过程中，Class中所有属性的 getter/setter 方法都会被封装成 MethodInvoker 对象，没有 getter/setter 的字段也会生成对应的 Get/SetFieldInvoker 对象。
 
+```java
+public interface Invoker {
+    // method执行invoke
+    Object invoke(Object target, Object[] args) throws IllegalAccessException, InvocationTargetException;
+    // 获取method的类型，setter返回param类型，getter返回return类型
+    Class<?> getType();
+}
+```
+- 类图
 
+![image-20230425135816524](material/反射Invoker类图.png)
 
+### ReflectorFactory
 
+ReflectorFactory主要是用来创建Reflector对象，并提供缓存功能，DefaultReflectorFactory为默认实现。
 
+由下面的缓存实现可知，缓存的没有提供清理功能，缓存的生命周期与DefaultReflectorFactory同步。
 
+```java
+public class DefaultReflectorFactory implements ReflectorFactory {
+    private boolean classCacheEnabled = true;
+    private final ConcurrentMap<Class<?>, Reflector> reflectorMap = new ConcurrentHashMap<>();
 
+    public DefaultReflectorFactory() {
+    }
+
+    @Override
+    public boolean isClassCacheEnabled() {
+        return classCacheEnabled;
+    }
+
+    @Override
+    public void setClassCacheEnabled(boolean classCacheEnabled) {
+        this.classCacheEnabled = classCacheEnabled;
+    }
+
+    @Override
+    public Reflector findForClass(Class<?> type) {
+        if (classCacheEnabled) {
+            // synchronized (type) removed see issue #461
+            return reflectorMap.computeIfAbsent(type, Reflector::new);
+        } else {
+            return new Reflector(type);
+        }
+    }
+
+}
+```
+
+### MetaClass
+
+Class的元信息，底层依赖reflector。
+
+### ObjectWrapper
+
+ObjectWrapper 封装的则是对象元信息。在 ObjectWrapper 中抽象了一个对象的属性信息，并提供了查询对象属性信息的相关方法，以及更新属性值的相关方法。
+
+> 属性相关工具
+
+- PropertyTokenizer 工具类负责解析由“.”和“[]”构成的表达式。PropertyTokenizer 继承了 Iterator 接口，可以迭代处理嵌套多层表达式。
+- PropertyCopier 是一个属性拷贝的工具类，提供了与 Spring 中 BeanUtils.copyProperties() 类似的功能，实现相同类型的两个对象之间的属性值拷贝，其核心方法是 copyBeanProperties() 方法。
+- PropertyNamer 工具类提供的功能是转换方法名到属性名，以及检测一个方法名是否为 getter 或 setter 方法。
 
 
 

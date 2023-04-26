@@ -5,6 +5,13 @@ package com.wenqi.test.mybatis;
  * @date 2023/4/14
  */
 public class Role {
+
+  public Role(long id, String roleName, String note) {
+    this.id = id;
+    this.roleName = roleName;
+    this.note = note;
+  }
+
   private long id;
   private String roleName;
   private String note;

@@ -11,6 +11,7 @@ import org.openjdk.jmh.annotations.Warmup;
 import org.openjdk.jmh.runner.RunnerException;
 
 import java.io.IOException;
+import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -32,16 +33,65 @@ public class CompressBenchmarkRunner {
     }
 
 
-    @Benchmark
-    @BenchmarkMode(Mode.AverageTime)
-    @OutputTimeUnit(TimeUnit.MILLISECONDS)
-    @Fork(value = 1)
-    @Warmup(iterations = 2)
-    @Measurement(iterations = 100)
-    @Threads(20)
-    public void testCompress() {
-        GzipUtils.compress(StringMaterial.bigValue);
-    }
+    //@Benchmark
+    //@BenchmarkMode(Mode.AverageTime)
+    //@OutputTimeUnit(TimeUnit.MILLISECONDS)
+    //@Fork(value = 1)
+    //@Warmup(iterations = 2)
+    //@Measurement(iterations = 100)
+    //@Threads(20)
+    //public void testCompress() {
+    //    GzipUtils.compress(StringMaterial.bigValue);
+    //}
+    //
+    //@Benchmark
+    //@BenchmarkMode(Mode.AverageTime)
+    //@OutputTimeUnit(TimeUnit.MILLISECONDS)
+    //@Fork(value = 1)
+    //@Warmup(iterations = 2)
+    //@Measurement(iterations = 100)
+    //@Threads(20)
+    //public void testCompress2() {
+    //    GzipUtils2.compress(StringMaterial.bigValue);
+    //}
+    //
+    //@Benchmark
+    //@BenchmarkMode(Mode.AverageTime)
+    //@OutputTimeUnit(TimeUnit.MILLISECONDS)
+    //@Fork(value = 1)
+    //@Warmup(iterations = 2)
+    //@Measurement(iterations = 100)
+    //@Threads(20)
+    //public void testDeCompress() {
+    //    GzipUtils.deCompress(StringMaterial.compressValue);
+    //}
+    //
+    //@Benchmark
+    //@BenchmarkMode(Mode.AverageTime)
+    //@OutputTimeUnit(TimeUnit.MILLISECONDS)
+    //@Fork(value = 1)
+    //@Warmup(iterations = 2)
+    //@Measurement(iterations = 100)
+    //@Threads(20)
+    //public void testDeCompress2() throws IOException {
+    //    GzipUtils2.extract(StringMaterial.compressValue);
+    //}
+    //
+    //@Benchmark
+    //@BenchmarkMode(Mode.AverageTime)
+    //@OutputTimeUnit(TimeUnit.MILLISECONDS)
+    //@Fork(value = 1)
+    //@Warmup(iterations = 2)
+    //@Measurement(iterations = 100)
+    //@Threads(20)
+    //public void testTotal() {
+    //    String origin = StringMaterial.bigValue;
+    //    String compress = GzipUtils.compress(origin);
+    //    String handle = GzipUtils.deCompress(compress);
+    //    if (!Objects.equals(origin, handle)) {
+    //        System.out.println("not equal!");
+    //    }
+    //}
 
     @Benchmark
     @BenchmarkMode(Mode.AverageTime)
@@ -50,7 +100,12 @@ public class CompressBenchmarkRunner {
     @Warmup(iterations = 2)
     @Measurement(iterations = 100)
     @Threads(20)
-    public void testDeCompress() {
-        GzipUtils.deCompress(StringMaterial.compressValue);
+    public void testTotal2() throws IOException {
+        String origin = StringMaterial.bigValue;
+        String compress = GzipUtils2.compress(origin);
+        String handle = GzipUtils2.extract(compress);
+        if (!Objects.equals(origin, handle)) {
+            System.out.println("not equal!");
+        }
     }
 }

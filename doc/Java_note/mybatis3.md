@@ -945,25 +945,147 @@ ObjectWrapper 封装的则是对象元信息。在 ObjectWrapper 中抽象了一
 - PropertyCopier 是一个属性拷贝的工具类，提供了与 Spring 中 BeanUtils.copyProperties() 类似的功能，实现相同类型的两个对象之间的属性值拷贝，其核心方法是 copyBeanProperties() 方法。
 - PropertyNamer 工具类提供的功能是转换方法名到属性名，以及检测一个方法名是否为 getter 或 setter 方法。
 
+### ObjectFactory
 
+如注释：MyBatis使用ObjectFactory来实例化指定的类。
 
+```java
+/**
+ * MyBatis uses an ObjectFactory to create all needed new Objects.
+ */
+public interface ObjectFactory {
+  default void setProperties(Properties properties) {}
 
+  <T> T create(Class<T> type);
 
+  <T> T create(Class<T> type, List<Class<?>> constructorArgTypes, List<Object> constructorArgs);
 
+  <T> boolean isCollection(Class<T> type);
+}
+```
 
+## 类型转换
 
+Java类型与数据库字段类型对应映射：
 
+枚举：`org.apache.ibatis.type.JdbcType`
 
+|                       数据库类型                        |  Java类型  |
+| :-----------------------------------------------------: | :--------: |
+|                      varchar、char                      |   String   |
+|                          blob                           |   byte[]   |
+|                    Integer unsigned                     |    Long    |
+| tinyint unsigned、smallint unsigned、mediumint unsigned |  Integer   |
+|                           bit                           |  Boolean   |
+|                     bigint unsigned                     | BigInteger |
+|                          float                          |   float    |
+|                         double                          |   double   |
+|                         decimal                         | BigDecimal |
 
+### TypeHandler
 
+类型转换器TypeHandler: `JdbcType  互转  JavaType`
 
+```java
+public interface TypeHandler<T> {
+    // 在通过PreparedStatement为SQL语句绑定参数时，会将传入的实参数据由JdbcType类型转换成Java类型
+    void setParameter(PreparedStatement ps, int i, T parameter, JdbcType jdbcType) throws SQLException;
+	// 从ResultSet中获取数据时会使用getResult()方法，其中会将读取到的数据由Java类型转换成JdbcType类型
+    T getResult(ResultSet rs, String columnName) throws SQLException;
 
+    T getResult(ResultSet rs, int columnIndex) throws SQLException;
 
+    T getResult(CallableStatement cs, int columnIndex) throws SQLException;
 
+}
+```
 
+- `TypeHandler.setParameter()`：完成JavaType到JdbcType的转换；
+- `TypeHandler.getResult()`：完成JdbcType到JavaType的转换。
 
+TypeHandler具体的转换逻辑由之类实现，其底层均是依赖JDBC的API。
 
+注：==TypeHandler 主要用于单个参数的类型转换，如果要将多个列的值转换成一个 Java 对象，可以在映射文件中定义合适的映射规则 &lt;resultMap&gt; 完成映射。==
 
+### TypeHandlerRegistry
+
+我们已经知道TypeHandler的转换原理，类型转换逻辑由子类实现，这时延申TypeHandler的两个问题：
+
+1. MyBatis如何管理众多TypeHandler的子类？
+2. MyBatis如果找到合适的类型转换器，进行类型转换？
+
+> TypeHandler注册
+
+Mybatis在初始化过程中，会创建所有已知的TypeHandler（包括内置实现和自定义实现），注册到**TypeHandlerRegistry**。
+
+1. TypeHandlerRegistry在构造过程中完成内置TypeHandler的注册：`org.apache.ibatis.type.TypeHandlerRegistry#TypeHandlerRegistry(org.apache.ibatis.session.Configuration)`，
+2. TypeHandlerRegistry提供注册自定义TypeHandler的注册方法（在解析mybatis-config.xml定义的标签`<typeHandlers>`过程调用注册）：`org.apache.ibatis.type.TypeHandlerRegistry#register(java.lang.Class<?>)`
+
+- TypeHandlerRegistry
+
+```java
+public final class TypeHandlerRegistry {
+	// 该集合记录从 JdbcType 到 JavaType 需要使用TypeHandler对象的映射
+    private final Map<JdbcType, TypeHandler<?>>  jdbcTypeHandlerMap = new EnumMap<>(JdbcType.class);
+    // 该集合记录从 JavaType 到 JdbcType 需要使用TypeHandler对象的映射
+    // 一对多的关系，如：Java中String 对应数据库 char、varchar、text 等多个类型
+    private final Map<Type, Map<JdbcType, TypeHandler<?>>> typeHandlerMap = new ConcurrentHashMap<>();
+    private final TypeHandler<Object> unknownTypeHandler;
+    // 该集合记录了全部 TypeHandler 的class类型以及对应的 TypeHandler 实例对象。
+    private final Map<Class<?>, TypeHandler<?>> allTypeHandlersMap = new HashMap<>();
+    private static final Map<JdbcType, TypeHandler<?>> NULL_TYPE_HANDLER_MAP = Collections.emptyMap();
+    private Class<? extends TypeHandler> defaultEnumTypeHandler = EnumTypeHandler.class;
+}
+```
+
+- 注册方法register
+
+```java
+private void register(Type javaType, JdbcType jdbcType, TypeHandler<?> handler) {
+    if (javaType != null) {
+        Map<JdbcType, TypeHandler<?>> map = typeHandlerMap.get(javaType);
+        if (map == null || map == NULL_TYPE_HANDLER_MAP) {
+            map = new HashMap<>();
+        }
+        map.put(jdbcType, handler);
+        typeHandlerMap.put(javaType, map);
+    }
+    allTypeHandlersMap.put(handler.getClass(), handler);
+}
+```
+
+> TypeHandler获取
+
+获取TypeHandler主要是通过重载方法：`getTypeHandler()`
+
+```java
+private <T> TypeHandler<T> getTypeHandler(Type type, JdbcType jdbcType) {
+    if (ParamMap.class.equals(type)) {
+        return null; // 过滤掉ParamMap类型
+    }
+
+    // 根据Java类型查找对应的TypeHandler集合
+       // Java数据类型 与 JDBC数据类型 的关系往往是一对多，
+    // 所以一般会先根据 Java数据类型 获取 Map<JdbcType, TypeHandler<?>>对象
+    // 再根据 JDBC数据类型 获取对应的 TypeHandler对象
+    Map<JdbcType, TypeHandler<?>> jdbcHandlerMap = getJdbcHandlerMap(type);
+    TypeHandler<?> handler = null;
+    if (jdbcHandlerMap != null) {
+        // 根据JdbcType类型查找对应的TypeHandler实例
+        handler = jdbcHandlerMap.get(jdbcType);
+        if (handler == null) {
+            // 没有对应的TypeHandler实例，则使用null对应的TypeHandler
+            handler = jdbcHandlerMap.get(null);
+        }
+
+        if (handler == null) {
+            // 如果jdbcHandlerMap只注册了一个TypeHandler，则使用此TypeHandler对象
+            handler = pickSoleHandler(jdbcHandlerMap);
+        }
+    }
+    return (TypeHandler<T>) handler;
+}
+```
 
 
 

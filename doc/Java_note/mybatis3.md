@@ -1065,7 +1065,7 @@ private <T> TypeHandler<T> getTypeHandler(Type type, JdbcType jdbcType) {
     }
 
     // 根据Java类型查找对应的TypeHandler集合
-       // Java数据类型 与 JDBC数据类型 的关系往往是一对多，
+    // Java数据类型 与 JDBC数据类型 的关系往往是一对多，
     // 所以一般会先根据 Java数据类型 获取 Map<JdbcType, TypeHandler<?>>对象
     // 再根据 JDBC数据类型 获取对应的 TypeHandler对象
     Map<JdbcType, TypeHandler<?>> jdbcHandlerMap = getJdbcHandlerMap(type);
@@ -1087,25 +1087,109 @@ private <T> TypeHandler<T> getTypeHandler(Type type, JdbcType jdbcType) {
 }
 ```
 
+## 日志
 
+Mybatis可以接口主流的日志框架，主要采用适配器模式，将各个第三方日志框架接口转换为框架内部自定义的日志接口。MyBatis 自定义的 Log 接口位于 `org.apache.ibatis.logging` 包中，相关的适配器也位于该包中。
 
+### Log实现
 
+> LogFactory初始化Logger
 
+Logger实际上是委托给日志框架的实现来打日志，如Slf4jImpl、Log4jImpl、Jdk14LoggingImpl等。（适配器模式)
 
+```java
+public final class LogFactory {
+    private static Constructor<? extends Log> logConstructor;
 
+    static {
+        // static方法的所有的日志实现都调用一遍tryImplementation, 但是只会实现一个
+        tryImplementation(LogFactory::useSlf4jLogging);
+        tryImplementation(LogFactory::useCommonsLogging);
+        tryImplementation(LogFactory::useLog4J2Logging);
+        tryImplementation(LogFactory::useLog4JLogging);
+        tryImplementation(LogFactory::useJdkLogging);
+        tryImplementation(LogFactory::useNoLogging);
+    }
+    
+    public static synchronized void useSlf4jLogging() {
+        setImplementation(org.apache.ibatis.logging.slf4j.Slf4jImpl.class);
+    }
 
+    private static void tryImplementation(Runnable runnable) {
+        // 只会初始化第一个logConstructor
+        if (logConstructor == null) {
+            try {
+                runnable.run();
+            } catch (Throwable t) {
+                // ignore
+            }
+        }
+    }
 
+    private static void setImplementation(Class<? extends Log> implClass) {
+        try {
+            Constructor<? extends Log> candidate = implClass.getConstructor(String.class);
+            Log log = candidate.newInstance(LogFactory.class.getName());
+            if (log.isDebugEnabled()) {
+                log.debug("Logging initialized using '" + implClass + "' adapter.");
+            }
+            logConstructor = candidate;
+        } catch (Throwable t) {
+            throw new LogException("Error setting Log implementation.  Cause: " + t, t);
+        }
+    }
+}
+```
 
+> 指定Mybatis logImpl
 
+Mybatis可以通过在mybatis-config.xml中配置\<setting>标签来指定logImpl。
 
+```xml
+  <settings>
+    <setting name="logImpl" value="Log4j"/>
+  </settings>
+```
 
+- 解析setting标签，获取logImpl
 
+org.apache.ibatis.builder.xml.XMLConfigBuilder#parseConfiguration
 
+```java
+private void parseConfiguration(XNode root) {
+  try {
+    Properties settings = settingsAsProperties(root.evalNode("settings"));
+    loadCustomLogImpl(settings);
+  } catch (Exception e) {
+    throw new BuilderException("Error parsing SQL Mapper Configuration. Cause: " + e, e);
+  }
+}
+```
 
+- logImpl可以使用别名，Mybatis初始化阶段已经注册别名
 
+```java
+// 日志实现类
+typeAliasRegistry.registerAlias("SLF4J", Slf4jImpl.class);
+typeAliasRegistry.registerAlias("COMMONS_LOGGING", JakartaCommonsLoggingImpl.class);
+typeAliasRegistry.registerAlias("LOG4J", Log4jImpl.class);
+typeAliasRegistry.registerAlias("LOG4J2", Log4j2Impl.class);
+typeAliasRegistry.registerAlias("JDK_LOGGING", Jdk14LoggingImpl.class);
+typeAliasRegistry.registerAlias("STDOUT_LOGGING", StdOutImpl.class);
+typeAliasRegistry.registerAlias("NO_LOGGING", NoLoggingImpl.class);
+```
 
+### Log使用
 
+我们知道当开启Mybatis的Debug模式，在执行SQL时会记录一些日志，负责记录日志的工具类均在 `org.apache.ibatis.logging。jdbc` 包中。
 
+由下图可知，负责记录日志的类有：ConnectionLogger、PreparedStatementLogger、ResultSetLogger、StatementLogger。其同时实现了接口`InvocationHandler`，由此可以Mybatis是通过JDK动态代理来记录业务方法前后日志。
+
+==注：分析动态代理模式关键是要找到代理的对象是什么？如JDK动态代理，先要找到这行代码：==
+
+`Proxy.newProxyInstance(ClassLoader loader, Class<?>[] interfaces, InvocationHandler h);`
+
+![image-20230508142327777](material/Mybatis-jdbc日志类图.png)
 
 
 

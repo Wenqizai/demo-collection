@@ -6,6 +6,7 @@
     <settings>
         <setting name="lazyLoadingEnabled" value="true"/>
         <!-- <setting name="aggressiveLazyLoading" value="false"/> -->
+        <setting name="logImpl" value="Log4j"/>
     </settings>
 
     <typeAliases>

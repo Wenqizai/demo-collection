@@ -1,5 +1,6 @@
 package com.wenqi.example.time;
 
+
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
@@ -8,15 +9,29 @@ import java.time.format.DateTimeFormatter;
  * @author liangwenqi
  * @date 2023/5/12
  */
-public class FormatTest {
+public class LocalTimeFormatTest {
     public static void main(String[] args) {
-        test4();
+        test6();
+    }
+
+    private static void test6() {
+        String text = "11:35";
+        LocalTime parse = LocalTime.parse(text);
+        System.out.println(LocalTime.now().isBefore(parse));
+        System.out.println(LocalTime.now().isAfter(parse));
+    }
+
+    private static void test5() {
+        String text = "20:05:02";
+        LocalTime.parse(text);
+        System.out.println(LocalTime.parse(text));
+        //System.out.println(LocalTime.now().isBefore(LocalTime.parse("11:14")));
     }
 
     private static void test4() {
-        DateTimeFormatter formatDateTime = DateTimeFormatter.ofPattern("HH:mm:ss");
+        DateTimeFormatter formatDateTime = DateTimeFormatter.ofPattern("HH:mm");
 
-        System.out.println(LocalDateTime.parse("20:05:02", formatDateTime));
+        System.out.println(LocalDateTime.parse("10:15:01", formatDateTime));
     }
 
 

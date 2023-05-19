@@ -1238,7 +1238,7 @@ private Connection doGetConnection(Properties properties) throws SQLException {
 }
 ```
 
-#### PooledDataSource
+#### PooledDataSource(池实现细节)
 
 - `PooledDataSource.popConnection()`
 
@@ -1549,15 +1549,37 @@ protected void pushConnection(PooledConnection conn) throws SQLException {
 }
 ```
 
+### Transaction
 
+我们可以通过mybatis-config.xml中`<environments>`标签来配置事务的相关，可供配置的事务管理器有：`JDBC| MANAGED`，如下：
 
+```xml
+<environments default="development">
+  <environment id="development">
+    <transactionManager type="JDBC"/>
+	<transactionManager type="MANAGED"/>
+    <dataSource type="POOLED"/>
+  </environment>
+</environments>
+```
 
+Mybatis定义事务接口的抽象：`org.apache.ibatis.transaction.Transaction`
 
+![image-20230519100654273](material/MyBatis/Mybatis-Transaction类图.png)
 
+> JdbcTransaction
 
+直接使用JDBC提供的API对事务进行操作提交或回滚，依赖于从DataSource中获取的Connection来管理事务的作用域。
 
+注意：Mybatis一般会默认设置自动提交事务，处于性能的考虑。（如果大量的Select语句在每次执行时，都调用commit/rollback性能耗费更大）
 
+> ManagedTransaction
 
+方法基本上无实现，而是让**外部容器来管理事务**的整个生命周期（比如 JEE 应用服务器的上下文）。 
+
+默认情况下它会关闭连接，然而一些容器并不希望这样，因此需要将 closeConnection 属性设置为 false 来阻止它默认的关闭行为。
+
+==注意：如果你正在使用 Spring + MyBatis，则没有必要配置事务管理器，因为 Spring 模块会使用自带的管理器来覆盖前面的配置。Spring相关的事务：org.mybatis.spring.transaction.SpringManagedTransaction==
 
 
 

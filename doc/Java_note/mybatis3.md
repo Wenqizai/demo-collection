@@ -1681,23 +1681,139 @@ public <T> void addMapper(Class<T> type) {
 
 ### MapperProxyFactory
 
+MapperProxyFactory主要用来生成代理对象MapperProxy。留意这里有个`methodCache`
 
+methodCache由MapperProxyFactory传入MapperProxy，在MapperProxy方法调用时put进入。由MapperProxyFactory传入这个methodCache的原因是，Mybatis希望：*Reuse MethodHandle for default methods*。
 
+**引申：**
 
+Java7之后，引入了另外一种反射使用方式`MethodHandle`，关于两者的区分和使用方式：
 
+- 性能区别
 
+  MethodHandle性能更优，因为访问检查MethodHandle在创建已经完成，而反射在运行时才检查；
 
+- 访问控制区别
 
+  Reflection可以绕过Java的访问限制，可以访问和修改私有的成员
 
+  MethodHandle尊重Java的访问限制，能访问与调用者在同一个包或者具有相应访问权限的成员。
 
+  MyBatis使用的MethodHandle还是Reflection的判断是: `java.lang.reflect.Method#isDefault`(public的interface)
 
+```java
+public class MapperProxyFactory<T> {
+	// Mapper接口的class类型
+    private final Class<T> mapperInterface;
+    // key: method, value: MapperMethodInvoker作用是执行代理方法, 区分不同方法修饰符使用不同的反射方式, Method或MethodHandle
+    private final Map<Method, MapperMethodInvoker> methodCache = new ConcurrentHashMap<>();
 
+    public MapperProxyFactory(Class<T> mapperInterface) {
+        this.mapperInterface = mapperInterface;
+    }
 
+    public Class<T> getMapperInterface() {
+        return mapperInterface;
+    }
 
+    public Map<Method, MapperMethodInvoker> getMethodCache() {
+        return methodCache;
+    }
 
+    @SuppressWarnings("unchecked")
+    protected T newInstance(MapperProxy<T> mapperProxy) {
+        return (T) Proxy.newProxyInstance(mapperInterface.getClassLoader(), new Class[] { mapperInterface }, mapperProxy);
+    }
 
+    public T newInstance(SqlSession sqlSession) {
+        final MapperProxy<T> mapperProxy = new MapperProxy<>(sqlSession, mapperInterface, methodCache);
+        return newInstance(mapperProxy);
+    }
 
+}
+```
 
+### MapperProxy
+
+MapperProxyFactory创建完代理对象MapperProxy之后，业务方法每次调用`Mapper.method()`都会进入`MapperProxy.invoke()`方法。
+
+- invoke
+
+```java
+public class MapperProxy<T> implements InvocationHandler, Serializable {
+    
+    @Override
+    public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+        try {
+            if (Object.class.equals(method.getDeclaringClass())) { // 如果目标方法继承自 Object，则直接调用目标方法
+                return method.invoke(this, args);
+            } else {
+                // 非继承Oject类的方法
+                return cachedInvoker(method).invoke(proxy, method, args, sqlSession);
+            }
+        } catch (Throwable t) {
+            throw ExceptionUtil.unwrapThrowable(t);
+        }
+    }
+}
+```
+
+- cachedInvoker
+
+```java
+private MapperMethodInvoker cachedInvoker(Method method) throws Throwable {
+    try {
+        // methodCache由MapperProxyFactory传入，先从缓存中获取
+        return methodCache.computeIfAbsent(method, m -> {
+            // public interface
+            // 默认方法是公共非抽象实例方法，即具有主体的非静态方法，在接口类型中声明。
+            if (m.isDefault()) {
+                try {
+                    // 这里根据JDK版本的不同，获取方法对应的MethodHandle的方式也有所不同
+                    if (privateLookupInMethod == null) {
+                        return new DefaultMethodInvoker(getMethodHandleJava8(method));
+                    } else {
+                        return new DefaultMethodInvoker(getMethodHandleJava9(method));
+                    }
+                } catch (IllegalAccessException | InstantiationException | InvocationTargetException
+                         | NoSuchMethodException e) {
+                    throw new RuntimeException(e);
+                }
+            } else {
+                // 对于其他方法，会创建MapperMethod并使用PlainMethodInvoker封装
+                return new PlainMethodInvoker(new MapperMethod(mapperInterface, method, sqlSession.getConfiguration()));
+            }
+        });
+    } catch (RuntimeException re) {
+        Throwable cause = re.getCause();
+        throw cause == null ? re : cause;
+    }
+}
+```
+
+- DefaultMethodInvoker
+
+```java
+private static class DefaultMethodInvoker implements MapperMethodInvoker {
+    @Override
+    public Object invoke(Object proxy, Method method, Object[] args, SqlSession sqlSession) throws Throwable {
+        // 首先将MethodHandle绑定到一个实例对象上，然后调用invokeWithArguments()方法执行目标方法
+        return methodHandle.bindTo(proxy).invokeWithArguments(args);
+    }
+}
+```
+
+- PlainMethodInvoker
+
+```java
+private static class PlainMethodInvoker implements MapperMethodInvoker {
+    @Override
+    public Object invoke(Object proxy, Method method, Object[] args, SqlSession sqlSession) throws Throwable {
+        // 直接执行MapperMethod.execute()方法完成方法调用
+        return mapperMethod.execute(sqlSession, args);
+    }
+}
+```
 
 
 

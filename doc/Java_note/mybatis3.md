@@ -1581,6 +1581,180 @@ Mybatis定义事务接口的抽象：`org.apache.ibatis.transaction.Transaction`
 
 ==注意：如果你正在使用 Spring + MyBatis，则没有必要配置事务管理器，因为 Spring 模块会使用自带的管理器来覆盖前面的配置。Spring相关的事务：org.mybatis.spring.transaction.SpringManagedTransaction==
 
+## Binding-Mapper
+
+Bingding模块，主要解决了执行SQL语句，传递参数等绑定问题。
+
+### Why Mapper？
+
+> 有MyBatis之前-iBatis
+
+Mybatis的前身是iBatis，使用iBatis查询一个对象时，通常的语句是:
+
+`SqlSession.queryForObject ("findById", customerId)`
+
+findById就是SQL语句的id标识，customerId为该SQL语句的传参。从上述语句我们可以分析出，id标识使用固定的字符串，以为着如果传递错误的id标识时，在iBaits在初始化时不能发现该id标识是错误的，不能够提前把错误暴露出去。
+
+**解决问题：**
+
+​	1. 建立id标识的唯一行 
+
+​	2. 提前将错误的id标识提前暴露出去
+
+> 有MyBatis之后
+
+MyBatis使用Mapper接口，接口中定义SQL语句、方法名id以及传参。在MyBatis初始化过程中，会将Mapper接口对应的映射配置文件中的SQL语句相关联，如果存在无法关联的SQL语句，MyBatis就会抛出异常，帮助我们及时发现问题。
+
+建立绑定关系之后，我们可以通过使用`Mapper.method()`来执行指定的SQL语句。
+
+**延申问题：**
+
+1. 我们知道接口没有方法的实现，那么调用的Mapper是MyBatis生成的代理对象
+2. 那么Mapper代理对象是如何创建的，原理是？
+
+> Mapper相关组件，也是binding模块核心组件
+
+Binding模块包：`org.apache.ibatis.binding`
+
+![image-20230522102910188](material/MyBatis/Binding模块相关组件.png)
+
+### MapperRegistry
+
+MapperRegistry，主要用来保存MapperProxyFactory的对象类，当我们添加一个Mapper时，就会new MapperProxyFactory保存在MapperRegistry，后面用来生成Mapper的对象对象MapperProxy。
+
+```java
+public class MapperRegistry {
+	// Configuration：在addMapper，初始化过程中需要用到该config
+    private final Configuration config;
+    // key: Mapper class类型, value: MapperProxyFactory
+    private final Map<Class<?>, MapperProxyFactory<?>> knownMappers = new HashMap<>();
+}
+```
+
+- getMapper
+
+委托MapperProxyFactory生成MapperProxy对象
+
+```java
+public <T> T getMapper(Class<T> type, SqlSession sqlSession) {
+  final MapperProxyFactory<T> mapperProxyFactory = (MapperProxyFactory<T>) knownMappers.get(type);
+  if (mapperProxyFactory == null) {
+    throw new BindingException("Type " + type + " is not known to the MapperRegistry.");
+  }
+  try {
+    return mapperProxyFactory.newInstance(sqlSession);
+  } catch (Exception e) {
+    throw new BindingException("Error getting mapper instance. Cause: " + e, e);
+  }
+}
+```
+
+- addMapper
+
+1. 注册MapperProxyFactory，knownMappers.put()
+
+2. 解析该Mapper，利用MapperAnnotationBuilder和config
+
+```java
+public <T> void addMapper(Class<T> type) {
+    if (type.isInterface()) {
+        if (hasMapper(type)) {
+            throw new BindingException("Type " + type + " is already known to the MapperRegistry.");
+        }
+        boolean loadCompleted = false;
+        try {
+            knownMappers.put(type, new MapperProxyFactory<>(type));
+            // It's important that the type is added before the parser is run
+            // otherwise the binding may automatically be attempted by the
+            // mapper parser. If the type is already known, it won't try.
+            MapperAnnotationBuilder parser = new MapperAnnotationBuilder(config, type);
+            parser.parse();
+            loadCompleted = true;
+        } finally {
+            if (!loadCompleted) {
+                knownMappers.remove(type);
+            }
+        }
+    }
+}
+```
+
+### MapperProxyFactory
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

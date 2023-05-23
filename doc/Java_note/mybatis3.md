@@ -1760,6 +1760,13 @@ public class MapperProxy<T> implements InvocationHandler, Serializable {
 
 - cachedInvoker
 
+使用MethodHandler情况，反射调用接口中有方法实现的方法：
+
+- 方法修饰符为`public`，并且不包含`abstract`和`static`修饰符。
+- 方法所属的类是一个接口。
+
+==其他情况使用MapperMethod，即MyBatis默认实现Mapper代理对象的方式。==
+
 ```java
 private MapperMethodInvoker cachedInvoker(Method method) throws Throwable {
     try {
@@ -1814,6 +1821,67 @@ private static class PlainMethodInvoker implements MapperMethodInvoker {
     }
 }
 ```
+
+### MapperMethod
+
+由上述可知对于调用方法是默认方法（**public non-abstract declared in an interface，即公共非抽象的方法，且声明在接口中**），MyBatis会采用MethodHandle的方式进行代理调用；与之相反，MyBatis就采用MapperMethod方式来调用。
+
+MapperMethod即是MyBatis用代理对象执行SQL，返回Object result的地方，执行方法：`org.apache.ibatis.binding.MapperMethod#execute`
+
+```java
+public class MapperMethod {
+  private final SqlCommand command;
+  private final MethodSignature method;
+}
+```
+
+#### SqlCommand
+
+SqlCommand主要是保存执行SQL的唯一标识（package.InterfaceName.methodName），以及执行SQL命令的类型，如：`INSERT, UPDATE, DELETE, SELECT, FLUSH`。
+
+> 找到匹配的MappedStatement
+
+两个方法 -> mapperInterface 指定的接口（父），declaringClass 方法声明的类（可能是子）
+
+查找逻辑，主要是用id标识configuration中去寻找，寻找方法：`org.apache.ibatis.binding.MapperMethod.SqlCommand#resolveMappedStatement`
+
+1. 从mapperInterface中获取，有则return;
+2. `if (mapperInterface.equals(declaringClass))`，即方法声明的类就是父的接口，return null;
+3. `if (declaringClass.isAssignableFrom(superInterface))`，即方法声明的类有父类接口，则递归从父类中查找。
+
+```java
+public static class SqlCommand {
+	// 构造方法中从初始化阶段解析好的MappedStatement中获取id标识和命令类型
+    // id标识：全路径包名 + 类名 + 方法名
+    private final String name;	// id标识
+    private final SqlCommandType type; // SQL命令类型
+
+    public SqlCommand(Configuration configuration, Class<?> mapperInterface, Method method) {
+        final String methodName = method.getName();
+        final Class<?> declaringClass = method.getDeclaringClass();
+        // 找到匹配的MappedStatement：1. 从指定的mapperInterface
+        // MappedStatement就是Mapper.xml解析之后的对象，包括SQL语句，ResultMap等
+        MappedStatement ms = resolveMappedStatement(mapperInterface, methodName, declaringClass, configuration);
+        if (ms == null) {
+            if (method.getAnnotation(Flush.class) != null) {
+                name = null;
+                type = SqlCommandType.FLUSH;
+            } else {
+                throw new BindingException("Invalid bound statement (not found): "
+                                           + mapperInterface.getName() + "." + methodName);
+            }
+        } else {
+            name = ms.getId();
+            type = ms.getSqlCommandType();
+            if (type == SqlCommandType.UNKNOWN) {
+                throw new BindingException("Unknown execution method for: " + name);
+            }
+        }
+    }
+}
+```
+
+#### MethodSignature
 
 
 

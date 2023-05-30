@@ -1883,7 +1883,53 @@ public static class SqlCommand {
 
 #### MethodSignature
 
+MethodSignature封装执行方法的信息。
 
+```java
+public static class MethodSignature {
+
+    private final boolean returnsMany; // 返回值是否为集合或数组
+    private final boolean returnsMap; // 返回值是否为Map
+    private final boolean returnsVoid; // 返回值是否为void
+    private final boolean returnsCursor; // 返回值是否为Cursor
+    private final boolean returnsOptional; // 返回值是否为Optional 
+    private final Class<?> returnType; // 方法返回值的具体类型
+    private final String mapKey;// 如果返回值是Map类型, 可以注解指定 @MapKey 的列名 
+    private final Integer resultHandlerIndex; // 标记该方法参数列表中 ResultHandler类型参数 的位置
+    private final Integer rowBoundsIndex; // 标记该方法参数列表中 RowBounds类型参数 的位置
+    /**
+     * 这是一个处理 Mapper接口中方法参数列表的解析器，它使用了一个 SortedMap<Integer, String>
+     * 类型的容器，记录了参数在参数列表中的位置索引与参数名之间的对应关系，key参数 在参数列表中的索引位置，
+     * value参数名(参数名可用@Param注解指定，默认使用参数索引作为其名称)
+     * 
+     * names 集合会跳过 RowBounds 类型以及 ResultHandler 类型的参数
+     */
+    // aMethod(@Param("M") int a, @Param("N") int b) ->  {{0, "M"}, {1, "N"}}
+	// aMethod(int a, int b) ->  {{0, "0"}, {1, "1"}}
+	aMethod(int a, RowBounds rb, int b) -> {{0, "0"}, {2, "1"}}
+    private final ParamNameResolver paramNameResolver;// 解析方法参数列表的工具类。
+
+    public MethodSignature(Configuration configuration, Class<?> mapperInterface, Method method) {
+        Type resolvedReturnType = TypeParameterResolver.resolveReturnType(method, mapperInterface);
+        if (resolvedReturnType instanceof Class<?>) {
+            this.returnType = (Class<?>) resolvedReturnType;
+        } else if (resolvedReturnType instanceof ParameterizedType) {
+            this.returnType = (Class<?>) ((ParameterizedType) resolvedReturnType).getRawType();
+        } else {
+            this.returnType = method.getReturnType();
+        }
+        this.returnsVoid = void.class.equals(this.returnType);
+        this.returnsMany = configuration.getObjectFactory().isCollection(this.returnType) || this.returnType.isArray();
+        this.returnsCursor = Cursor.class.equals(this.returnType);
+        this.returnsOptional = Optional.class.equals(this.returnType);
+        this.mapKey = getMapKey(method);
+        this.returnsMap = this.mapKey != null;
+        this.rowBoundsIndex = getUniqueParamIndex(method, RowBounds.class);
+        this.resultHandlerIndex = getUniqueParamIndex(method, ResultHandler.class);
+        this.paramNameResolver = new ParamNameResolver(configuration, method);
+    }
+}
+```
 
 
 

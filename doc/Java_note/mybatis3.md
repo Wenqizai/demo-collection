@@ -1748,7 +1748,7 @@ public class MapperProxy<T> implements InvocationHandler, Serializable {
             if (Object.class.equals(method.getDeclaringClass())) { // 如果目标方法继承自 Object，则直接调用目标方法
                 return method.invoke(this, args);
             } else {
-                // 非继承Oject类的方法
+                // 非继承Oject类的方法, 实际上委托给MapperMethodInvoker, 由其来调用invoke()方法
                 return cachedInvoker(method).invoke(proxy, method, args, sqlSession);
             }
         } catch (Throwable t) {
@@ -1818,6 +1818,70 @@ private static class PlainMethodInvoker implements MapperMethodInvoker {
     public Object invoke(Object proxy, Method method, Object[] args, SqlSession sqlSession) throws Throwable {
         // 直接执行MapperMethod.execute()方法完成方法调用
         return mapperMethod.execute(sqlSession, args);
+    }
+}
+```
+
+### MapperMethodInvoker
+
+MapperProxy执行invoke()方法时，会寻找对应的MapperMethodInvoker，并委托给MapperMethodInvoker执行invoke方法。示例方法：`org.apache.ibatis.binding.MapperProxy#invoke`。
+
+```java
+public class MapperProxy<T> implements InvocationHandler, Serializable { 
+    @Override
+    public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+        cachedInvoker(method).invoke(proxy, method, args, sqlSession)
+    }
+}
+```
+
+`cachedInvoker(method)`会返回两种类型的MapperMethodInvoker，分别是`DefaultMethodInvoker`和`PlainMethodInvoker`。
+
+-  DefaultMethodInvoker
+
+  代理方法满足，`public && non-abstract && declared in an interface`使用该MapperMethodInvoker，我们使用的Mapper定义的方法是抽象的，所以不会使用该MapperMethodInvoker。
+
+-  PlainMethodInvoker：
+
+​	我们定义的Mapper方法就是使用这个MapperMethodInvoker。
+
+> 相关类
+
+如下，正在执行代理的业务方法是`MapperMethodInvoker.invoke()`。
+
+- 对于PlainMethodInvoker来说，invoke调用的是`mapperMethod.execute(sqlSession, args)`
+- 对于DefaultMethodInvoker来说，invoke调用的是`methodHandle.bindTo(proxy).invokeWithArguments(args)`
+
+```java
+interface MapperMethodInvoker {
+    Object invoke(Object proxy, Method method, Object[] args, SqlSession sqlSession) throws Throwable;
+}
+
+private static class PlainMethodInvoker implements MapperMethodInvoker {
+    private final MapperMethod mapperMethod;
+
+    public PlainMethodInvoker(MapperMethod mapperMethod) {
+        super();
+        this.mapperMethod = mapperMethod;
+    }
+
+    @Override
+    public Object invoke(Object proxy, Method method, Object[] args, SqlSession sqlSession) throws Throwable {
+        return mapperMethod.execute(sqlSession, args);
+    }
+}
+
+private static class DefaultMethodInvoker implements MapperMethodInvoker {
+    private final MethodHandle methodHandle;
+
+    public DefaultMethodInvoker(MethodHandle methodHandle) {
+        super();
+        this.methodHandle = methodHandle;
+    }
+
+    @Override
+    public Object invoke(Object proxy, Method method, Object[] args, SqlSession sqlSession) throws Throwable {
+        return methodHandle.bindTo(proxy).invokeWithArguments(args);
     }
 }
 ```

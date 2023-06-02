@@ -1824,7 +1824,7 @@ private static class PlainMethodInvoker implements MapperMethodInvoker {
 
 ### MapperMethod
 
-由上述可知对于调用方法是默认方法（**public non-abstract declared in an interface，即公共非抽象的方法，且声明在接口中**），MyBatis会采用MethodHandle的方式进行代理调用；与之相反，MyBatis就采用MapperMethod方式来调用。
+由上述可知对于调用方法是默认方法（**public, non-abstract, declared in an interface，即声明在接口中, 公共非抽象的方法**），MyBatis会采用MethodHandle的方式进行代理调用；与之相反，MyBatis就采用MapperMethod方式来调用。
 
 MapperMethod即是MyBatis用代理对象执行SQL，返回Object result的地方，执行方法：`org.apache.ibatis.binding.MapperMethod#execute`
 

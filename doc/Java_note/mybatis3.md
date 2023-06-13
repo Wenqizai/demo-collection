@@ -2274,6 +2274,378 @@ private <T> Cursor<T> executeForCursor(SqlSession sqlSession, Object[] args) {
 }
 ```
 
+## 缓存管理
+
+缓存管理相关类所在包：org.apache.ibatis.cache
+
+![](E:\poject\demo\demo-collection\doc\Java_note\material\MyBatis\Cache装饰器相关类.png)
+
+### PerpetualCache
+
+Cache的具体实现类，装饰类也是基于此来封装。可以看到PerpetualCache使用Map作为缓存，id作为唯一标识（留意重写的equals和hashCode方法，都是基于id的）。
+
+```java
+public class PerpetualCache implements Cache {
+  private final String id;
+  private final Map<Object, Object> cache = new HashMap<>();
+}
+```
+
+### blockingCache
+
+blockingCache在原有的基础上**增加一个阻塞获取缓存**功能。具体实现是：每次获取缓存前都需要根据key来获取锁trylock，如果获取不到则阻塞等待。
+
+从`getObject(Object key)`方法可以看到，如果获取的value为null，则一直lock，直到调用当前线程调用`putObject(Object key, Object value)`，或者有线程调用`removeObject(Object key)`才会释放锁。**（坑点）**
+
+removeObject(Object key)：这个方法命名很奇葩，但是人家还是写了注释的。（despite of its name, this method is called only to release locks）
+
+```java
+public class BlockingCache implements Cache {
+    // 超时时间
+    private long timeout;
+    // cache的实现
+    private final Cache delegate;
+    // 保存锁的Map
+    private final ConcurrentHashMap<Object, ReentrantLock> locks;
+
+    @Override
+    public void putObject(Object key, Object value) {
+        try {
+            delegate.putObject(key, value);
+        } finally {
+            releaseLock(key);
+        }
+    }
+
+    @Override
+    public Object getObject(Object key) {
+        acquireLock(key);
+        Object value = delegate.getObject(key);
+        if (value != null) {
+            releaseLock(key);
+        }
+        return value;
+    }
+}
+```
+
+### FifoCache
+
+FifoCache：先进先出缓存，first in, first out cache。该类缓存需要注意一下问题：
+
+- 维护队列
+- 队列大小
+- 缓存过期
+
+源码中可知，FifoCache使用LinkedList来维护队列的顺序，队列大小默认为1024。在putObject时需要维持队列的大小，超出指定size时，需要remove oldest object。
+
+```java
+public class FifoCache implements Cache {
+
+    private final Cache delegate;
+    private final Deque<Object> keyList;
+    private int size;
+
+    public FifoCache(Cache delegate) {
+        this.delegate = delegate;
+        this.keyList = new LinkedList<>();
+        this.size = 1024;
+    }
+    
+    @Override
+    public void putObject(Object key, Object value) {
+        cycleKeyList(key);
+        delegate.putObject(key, value);
+    }
+
+    @Override
+    public Object getObject(Object key) {
+        return delegate.getObject(key);
+    }
+
+    @Override
+    public Object removeObject(Object key) {
+        return delegate.removeObject(key);
+    }
+
+    @Override
+    public void clear() {
+        delegate.clear();
+        keyList.clear();
+    }
+
+    private void cycleKeyList(Object key) {
+        keyList.addLast(key);
+        if (keyList.size() > size) {
+            Object oldestKey = keyList.removeFirst();
+            delegate.removeObject(oldestKey);
+        }
+    }
+}
+```
+
+### LoggingCache
+
+LoggingCache：以debug日志形式，记录缓存的命中率，可以配合其他装饰器缓存使用。
+
+缺点是，没有提供重置方法，没有很直观地算出某段时间的缓存命中率。
+
+```java
+public class LoggingCache implements Cache {
+
+    private final Log log;
+    private final Cache delegate;
+    protected int requests = 0;
+    protected int hits = 0;
+
+    public LoggingCache(Cache delegate) {
+        this.delegate = delegate;
+        this.log = LogFactory.getLog(getId());
+    }
+
+    @Override
+    public Object getObject(Object key) {
+        requests++;
+        final Object value = delegate.getObject(key);
+        if (value != null) {
+            hits++;
+        }
+        if (log.isDebugEnabled()) {
+            log.debug("Cache Hit Ratio [" + getId() + "]: " + getHitRatio());
+        }
+        return value;
+    }
+
+    private double getHitRatio() {
+        return (double) hits / (double) requests;
+    }
+}
+```
+
+### LruCache
+
+LruCache：最近使用缓存，least recently used cache。该类缓存需要注意一下问题：
+
+- 维护队列
+- 队列大小
+- 缓存清理
+- 缓存维护
+
+实际上，LinkedHashMap已经维护好了LRU的规则，LruCache只需要维护参与LRU的key，重写`removeEldestEntry()`方法，触发LRU维护的方法，即getObject()，就可以实现LruCahce。
+
+```java
+public class LruCache implements Cache {
+
+    private final Cache delegate;
+    private Map<Object, Object> keyMap;
+    private Object eldestKey;
+
+    public LruCache(Cache delegate) {
+        this.delegate = delegate;
+        setSize(1024);
+    }
+
+    public void setSize(final int size) {
+        // access = true， 代表getObject时维护链表的LRU有序性
+        keyMap = new LinkedHashMap<Object, Object>(size, .75F, true) {
+            private static final long serialVersionUID = 4267176411845948333L;
+            // 父类LinkedHashMap默认返回false，需要按需重写
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<Object, Object> eldest) {
+                boolean tooBig = size() > size;
+                if (tooBig) {
+                    eldestKey = eldest.getKey();
+                }
+                return tooBig;
+            }
+        };
+    }
+
+    @Override
+    public void putObject(Object key, Object value) {
+        delegate.putObject(key, value);
+        cycleKeyList(key);
+    }
+
+    @Override
+    public Object getObject(Object key) {
+        keyMap.get(key); //touch
+        return delegate.getObject(key);
+    }
+
+    @Override
+    public Object removeObject(Object key) {
+        return delegate.removeObject(key);
+    }
+
+    @Override
+    public void clear() {
+        delegate.clear();
+        keyMap.clear();
+    }
+
+    private void cycleKeyList(Object key) {
+        keyMap.put(key, key);
+        if (eldestKey != null) {
+            delegate.removeObject(eldestKey);
+            eldestKey = null;
+        }
+    }
+}
+```
+
+### ScheduledCache
+
+懒式清理缓存，当调用`getObejct()`, `putObejct()`, `removeObject()`方法时，判断缓存过期时间，若过期了则触发缓存清理。
+
+### SerializedCache
+
+序列化缓存，`putObject()`时序列化相应的value，`getObject()`时反序列化value。
+
+> 摘取ChatGPT对序列化的回答：
+>
+> 
+>
+> Java中的序列化是将对象转换为字节流的过程，可以将对象在网络中进行传输或者存储到文件中。序列化的主要作用是实现对象的持久化和跨网络传输。
+>
+> 
+>
+> 以下是一些常见的序列化应用场景：
+>
+> 1. 对象持久化：通过序列化，可以将对象保存到磁盘上，以便在程序重新启动时恢复对象的状态。这在需要长期保存对象数据或者需要对对象进行传输的情况下非常有用。
+> 2. 网络通信：在分布式系统或者客户端-服务器架构中，可以使用序列化将对象转换为字节流，然后通过网络进行传输。接收方可以将字节流反序列化为对象，以便恢复原始对象。
+> 3. 缓存：序列化还可以用于将对象存储在缓存中，以提高性能。当从缓存中获取对象时，可以通过反序列化来恢复对象，而不必重新创建对象。
+> 4. 远程方法调用（RPC）：序列化在远程方法调用中发挥重要作用。客户端可以将方法参数对象序列化为字节流，然后通过网络将其发送给远程服务器执行。服务器接收到字节流后，可以将其反序列化为对象，并执行相应的方法操作。
+>
+> 
+>
+> 相比于使用 JSON 进行序列化，Java 中的序列化（通常是通过 Java 序列化机制实现的）具有以下优点和缺点：
+>
+> 优点：
+>
+> 1. 简单易用：Java 序列化是 Java 语言内置的机制，使用起来相对简单，无需额外的库或依赖。
+> 2. 对象完整性：Java 序列化可以完整地保存对象的状态，包括对象的字段值、引用关系和类的层次结构，因此可以轻松地保存和恢复对象的完整性。
+> 3. 适用性广泛：Java 序列化可以序列化几乎所有的 Java 对象，包括自定义类和标准库中的类，无需额外的配置。
+> 4. 支持循环引用：Java 序列化机制可以处理对象之间的循环引用，保证在序列化和反序列化过程中对象的引用关系不会丢失。
+>
+> 缺点：
+>
+> 1. **可读性差**：序列化后的字节流是二进制数据，不易于人类阅读和理解。相比之下，JSON 是一种文本格式，具有更好的可读性和可调试性。
+> 2. **兼容性限制**：Java 序列化依赖于对象的类结构，如果对象的类发生变化（例如添加、删除或修改字段），就可能导致序列化和反序列化失败。这限制了跨语言和跨平台的兼容性。
+> 3. **性能开销**：相对于 JSON 或其他基于文本的序列化格式，Java 序列化通常会产生更大的字节流，并且序列化和反序列化的过程涉及更多的计算和IO操作，可能导致性能开销较高。
+> 4. **版本问题**：Java 序列化对类的版本敏感，如果序列化时的类版本与反序列化时的类版本不匹配，会导致反序列化失败。这就需要开发人员在类的演进过程中进行额外的管理和维护。
+
+### SoftCache
+
+软引用cache，GC后会回收这部分的cache。
+
+很多场景下，我们的程序需要在一个对象被 GC 时得到通知，引用队列就是用于收集这些信息的队列。**在创建 SoftReference 对象 时，可以为其关联一个引用队列，当 SoftReference 所引用的对象被 GC 时， JVM 就会将该 SoftReference 对象 添加到与之关联的引用队列中**。当需要检测这些通知信息时，就可以从引用队列中获取这些 SoftReference 对象。不仅是 SoftReference，弱引用和虚引用都可以关联相应的队列。
+
+**[bug]**
+
+==这个hardLinksToAvoidGarbageCollection非常费解，会不会内存泄漏呀，同时get相同key时还能加入这个队列？==
+
+这么多年如果没人用这个cache，同时hardLinksToAvoidGarbageCollection也没暴露出，MyBatis就不管了，哈哈哈。
+
+```java
+public class SoftCache implements Cache {
+    // 强引用队列，FIFO保存不被GC的Object，目前MyBatis并没有将其暴露，所以里面保存的热点数据也是莫有用
+    private final Deque<Object> hardLinksToAvoidGarbageCollection;
+    // 关联弱引用队列，用于记录已经被 GC 的缓存项所对应的 SoftEntry对象
+    private final ReferenceQueue<Object> queueOfGarbageCollectedEntries;
+    private final Cache delegate;
+    // 强引用队列大小
+    private int numberOfHardLinks;
+
+
+    @Override
+    public void putObject(Object key, Object value) {
+        removeGarbageCollectedItems();
+        delegate.putObject(key, new SoftEntry(key, value, queueOfGarbageCollectedEntries));
+    }
+
+    @Override
+    public Object getObject(Object key) {
+        Object result = null;
+        @SuppressWarnings("unchecked") // assumed delegate cache is totally managed by this cache
+        SoftReference<Object> softReference = (SoftReference<Object>) delegate.getObject(key);
+        if (softReference != null) {
+            result = softReference.get();
+            if (result == null) {
+                delegate.removeObject(key);
+            } else {
+                // 如果弱引用不为空，则将该引用添加到强引用队列中
+                // See #586 (and #335) modifications need more than a read lock
+                synchronized (hardLinksToAvoidGarbageCollection) {
+                    hardLinksToAvoidGarbageCollection.addFirst(result);
+                    if (hardLinksToAvoidGarbageCollection.size() > numberOfHardLinks) {
+                        hardLinksToAvoidGarbageCollection.removeLast();
+                    }
+                }
+            }
+        }
+        return result;
+    }
+    
+    @Override
+    public Object removeObject(Object key) {
+        removeGarbageCollectedItems();
+        return delegate.removeObject(key);
+    }
+
+    @Override
+    public void clear() {
+        synchronized (hardLinksToAvoidGarbageCollection) {
+            hardLinksToAvoidGarbageCollection.clear();
+        }
+        removeGarbageCollectedItems();
+        delegate.clear();
+    }
+
+    private void removeGarbageCollectedItems() {
+        SoftEntry sv;
+        while ((sv = (SoftEntry) queueOfGarbageCollectedEntries.poll()) != null) {
+            delegate.removeObject(sv.key);
+        }
+    }
+
+    private static class SoftEntry extends SoftReference<Object> {
+        private final Object key;
+
+        SoftEntry(Object key, Object value, ReferenceQueue<Object> garbageCollectionQueue) {
+            super(value, garbageCollectionQueue);
+            this.key = key;
+        }
+    }
+}
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

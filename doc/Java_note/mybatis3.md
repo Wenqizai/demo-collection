@@ -2620,6 +2620,12 @@ public class SoftCache implements Cache {
 }
 ```
 
+### 缓存构建
+
+构建方法：`org.apache.ibatis.builder.MapperBuilderAssistant#useNewCache`
+
+缓存构建过程在Mybatis初始化的流程来完成，xml启动关联`<cache>`标签，注解启动关联注解`@CacheNamespace`。
+
 
 
 

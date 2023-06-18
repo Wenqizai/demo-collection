@@ -2637,6 +2637,12 @@ Mybatis默认开启一级缓存，二级缓存的开启可看<缓存构建>章�
 > 缓存延申的疑问：
 >
 > Mybatis默认开启的缓存机制，会不会对GC造成压力和增加FULL GC的频次呢？
+>
+> 
+>
+> 一级缓存不会，因为会话结束之后缓存被清理了
+>
+> 二级缓存就难说了
 
 #### 一级缓存
 
@@ -2690,6 +2696,9 @@ Mybatis-config.xml配置如下，可选`SESSION`或者`STATEMENT`，默认是`SE
 - STATEMENT：缓存只对当前执行的这一个`Statement`有效（每次查询结束清掉缓存）。
 
 ```xml
+<!-- 注意这个是开启二级缓存, 一级缓存默认开启, 没有提供修改的入口 -->
+<setting name="cacheEnabled" value="true"/>
+<!-- 设置一级缓存的级别 -->
 <setting name="localCacheScope" value="SESSION"/>
 ```
 

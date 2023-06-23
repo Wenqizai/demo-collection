@@ -17,7 +17,7 @@ import java.io.IOException;
 import java.util.zip.GZIPOutputStream;
 
 
-@WebFilter(filterName = "GZipServletFilter", urlPatterns = "/*")
+@WebFilter(filterName = "GZipServletFilter", urlPatterns = "/filter/*")
 public class GZipServletFilter implements Filter {
 
     private Logger log = LoggerFactory.getLogger(GZipServletFilter.class);

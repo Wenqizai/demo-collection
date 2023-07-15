@@ -1,34 +1,46 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <!DOCTYPE mapper
-  PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
-  "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.wenqi.test.mybatis.RoleMapper">
+    <resultMap type="role" id="roleMap">
+        <id column="id" property="id" javaType="long" jdbcType="BIGINT"/>
+        <result column="role_name" property="roleName" javaType="string" jdbcType="VARCHAR"/>
+        <result column="note" property="note" typeHandler="com.wenqi.test.mybatis.MyStringHandler"/>
+    </resultMap>
 
-  <resultMap type="role" id="roleMap">
-    <id column="id" property="id" javaType="long" jdbcType="BIGINT" />
-    <result column="role_name" property="roleName" javaType="string" jdbcType="VARCHAR" />
-    <result column="note" property="note" typeHandler="com.wenqi.test.mybatis.MyStringHandler" />
-  </resultMap>
+    <select id="getRole" parameterType="long" resultMap="roleMap">
+        select id, role_name as roleName, note
+        from role
+        where id = #{id,jdbcType=BIGINT}
+    </select>
 
-  <select id="getRole" parameterType="long" resultMap="roleMap">
-    select id, role_name as roleName, note from role where id = #{id,jdbcType=BIGINT}
-  </select>
+    <select id="findRole" parameterType="long" resultMap="roleMap">
+        select id, role_name, note
+        from role
+        where role_name like CONCAT('%',
+                                    #{roleName, javaType=string, jdbcType=VARCHAR, typeHandler=com.wenqi.test.mybatis.MyStringHandler},
+                                    '%')
+    </select>
 
-  <select id="findRole" parameterType="long" resultMap="roleMap">
-    select id, role_name, note from role
-    where role_name like CONCAT('%',#{roleName, javaType=string, jdbcType=VARCHAR, typeHandler=com.wenqi.test.mybatis.MyStringHandler},'%')
-  </select>
+    <insert id="insertRole" parameterType="role">
+        insert into role (role_name, note) value (#{roleName}, #{note})
+    </insert>
 
-  <insert id="insertRole" parameterType="role">
-    insert into role (role_name, note) value (#{roleName}, #{note})
-  </insert>
+    <delete id="deleteRole" parameterType="long">
+        delete
+        from role
+        where id = #{id}
+    </delete>
 
-  <delete id="deleteRole" parameterType="long">
-    delete from role where id = #{id}
-  </delete>
+    <sql id="someCondition">
+        and role_name = ''
+    </sql>
 
-  <sql id="someCondition">
-    and role_name = ''
-  </sql>
-
+    <select id="selectRoleById" resultType="com.wenqi.test.mybatis.Role">
+        select * from role where id in
+        <foreach collection="list" open="(" close=")" separator="," item="item">
+            #{item,jdbcType=BIGINT}
+        </foreach>
+    </select>
 </mapper>

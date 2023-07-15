@@ -1,6 +1,9 @@
 package com.wenqi.test.mybatis;
 
+import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+
+import java.util.List;
 
 /**
  * @author liangwenqi
@@ -15,4 +18,7 @@ public interface RoleMapper {
     public int deleteRole(Long id);
 
     public int insertRole(Role role);
+
+    List<Role> selectRoleById(@Param("list") List<Long> ids);
+
 }

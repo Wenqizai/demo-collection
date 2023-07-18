@@ -1,14 +1,16 @@
 package com.wenqi.test.mybatis;
 
+import com.alibaba.fastjson.JSON;
 import org.apache.ibatis.io.Resources;
 import org.apache.ibatis.session.SqlSession;
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.apache.ibatis.session.SqlSessionFactoryBuilder;
 import org.apache.log4j.BasicConfigurator;
-import org.apache.log4j.PropertyConfigurator;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.Arrays;
+import java.util.List;
 
 /**
  * @author liangwenqi
@@ -33,9 +35,10 @@ public class Main {
     SqlSession sqlSession = null;
     try {
       sqlSession = sqlSessionFactory.openSession();
-      RoleMapper roleMapper = sqlSession.getMapper(RoleMapper.class);
-      Role role = roleMapper.getRole(1L);
-      System.out.println(role.getId() + ":" + role.getRoleName() + ":" + role.getNote());
+
+      // 业务方法
+      test01(sqlSession);
+
       sqlSession.commit();
 
     } catch (Exception e) {
@@ -45,5 +48,20 @@ public class Main {
     } finally {
       sqlSession.close();
     }
+  }
+
+  /**
+   * 模拟in参数过大会诱发oom场景
+   */
+  private static void test02(SqlSession sqlSession) {
+    RoleMapper roleMapper = sqlSession.getMapper(RoleMapper.class);
+    List<Role> roles = roleMapper.selectRoleById(Arrays.asList(1L, 2L, 3L, 4L));
+    System.out.println(JSON.toJSONString(roles));
+  }
+
+  private static void test01(SqlSession sqlSession) {
+    RoleMapper roleMapper = sqlSession.getMapper(RoleMapper.class);
+    Role role = roleMapper.getRole(1L);
+    System.out.println(role.getId() + ":" + role.getRoleName() + ":" + role.getNote());
   }
 }

@@ -2278,7 +2278,7 @@ private <T> Cursor<T> executeForCursor(SqlSession sqlSession, Object[] args) {
 
 缓存管理相关类所在包：org.apache.ibatis.cache
 
-![](E:\poject\demo\demo-collection\doc\Java_note\material\MyBatis\Cache装饰器相关类.png)
+![](.\material\MyBatis\Cache装饰器相关类.png)
 
 ### PerpetualCache
 
@@ -2625,6 +2625,157 @@ public class SoftCache implements Cache {
 构建方法：`org.apache.ibatis.builder.MapperBuilderAssistant#useNewCache`
 
 缓存构建过程在Mybatis初始化的流程来完成，xml启动关联`<cache>`标签，注解启动关联注解`@CacheNamespace`。
+
+### 缓存机制
+
+参考文档：https://tech.meituan.com/2018/01/19/mybatis-cache.html
+
+Mybatis使用一二级缓存来减缓数据库访问的压力，通常情况下我们开发人员基本上都是使用Mybatis的默认配置，对于缓存来说也不例外。
+
+Mybatis默认开启一级缓存，二级缓存的开启可看<缓存构建>章节。
+
+> 缓存延申的疑问：
+>
+> Mybatis默认开启的缓存机制，会不会对GC造成压力和增加FULL GC的频次呢？
+>
+> 
+>
+> 一级缓存不会，因为会话结束之后缓存被清理了
+>
+> 二级缓存就难说了
+
+#### 一级缓存
+
+##### 原理
+
+![image-20230617153651942](material/MyBatis/一级缓存原理图.png)
+
+同一个会话中，有可能执行多次查询条件完全相同的SQL，MyBatis提供的一级缓存可以减少对数据库查询的次数。相同的SQL语句，会优先命中一级缓存。由此可知，一级缓存是Session级别的。
+
+==缓存是Session级别的，意味者其他Session更新了数据，而本次的Session读取到脏数据。（尤其是我们的服务是分布式的时候）==
+
+![](https://awps-assets.meituan.net/mit-x/blog-images-bundle-2018a/d76ec5fe.jpg)
+
+每个SqlSession中持有了Executor，每个Executor中有一个LocalCache。当用户发起查询时，MyBatis根据当前执行的语句生成`MappedStatement`，在Local Cache进行查询，如果缓存命中的话，直接返回结果给用户，如果缓存没有命中的话，查询数据库，结果写入`Local Cache`，最后返回结果给用户。具体实现类的类关系图如上，伪代码如下。
+
+当Executor进行提交commit或回滚rollback时，自动清空LocalCache，所以LocalCache属于Session级别。
+
+```java
+protected PerpetualCache localCache;
+
+public <E> List<E> query(MappedStatement ms, Object parameter, RowBounds rowBounds, ResultHandler resultHandler, CacheKey key, BoundSql boundSql) throws SQLException {
+  // ms非select语句都要刷新缓存
+  if (ms.isFlushCacheRequired()) {
+    clearLocalCache();
+  }
+  // 查缓存
+  list = localCache.getObject(key);
+  if (list != null) {
+    // 这个主要是处理存储过程用的
+    handleLocallyCachedOutputParameters(ms, key, parameter, boundSql);
+  } else {
+    // 缓存为空，查数据库并设置缓存
+    list = queryFromDatabase(ms, parameter, rowBounds, resultHandler, key, boundSql);
+    localCache.putObject(key, EXECUTION_PLACEHOLDER);
+  }
+
+  // STATEMENT级别，每次查询结束都清掉缓存
+  if (configuration.getLocalCacheScope() == LocalCacheScope.STATEMENT) {
+    clearLocalCache(); // issue #482
+  }
+
+  return list;
+}
+```
+
+##### 配置与使用
+
+Mybatis-config.xml配置如下，可选`SESSION`或者`STATEMENT`，默认是`SESSION`级别。
+
+- SESSION：在一个MyBatis会话中执行的所有语句，都会共享这一个缓存
+- STATEMENT：缓存只对当前执行的这一个`Statement`有效（每次查询结束清掉缓存）。
+
+```xml
+<!-- 注意这个是开启二级缓存, 一级缓存默认开启, 没有提供修改的入口 -->
+<setting name="cacheEnabled" value="true"/>
+<!-- 设置一级缓存的级别 -->
+<setting name="localCacheScope" value="SESSION"/>
+```
+
+#### 二级缓存
+
+##### 原理
+
+二级缓存是用来解决不同的SqlSession之间需要共享缓存的问题。
+
+开启二级缓存后，会使用CachingExecutor装饰Executor，进入一级缓存的查询流程前，现在CachingExecutor进行二级缓存的查询，如下图：
+
+当开启缓存后，数据的查询执行的流程就是 二级缓存 -> 一级缓存 -> 数据库。
+
+
+
+![image-20230617163254078](material/MyBatis/二级缓存原理图.png)
+
+CachingExecutor二级缓存实现伪代码如下：
+
+```java
+public <E> List<E> query(MappedStatement ms, Object parameterObject, RowBounds rowBounds, ResultHandler resultHandler, CacheKey key, BoundSql boundSql) throws SQLException {
+  // 从MappedStatement中获取缓存，同一个MappedStatement是同个缓存
+  Cache cache = ms.getCache();
+  if (cache != null) {
+    flushCacheIfRequired(ms);
+    if (ms.isUseCache() && resultHandler == null) { 
+      ensureNoOutParams(ms, parameterObject, boundSql);
+      // 如果没有脏数据，则从缓存中获取，加锁
+      if (!dirty) {
+        cache.getReadWriteLock().readLock().lock();
+        try {
+          @SuppressWarnings("unchecked")
+          List<E> cachedList = (List<E>) cache.getObject(key);
+          if (cachedList != null) return cachedList;
+        } finally {
+          cache.getReadWriteLock().readLock().unlock();
+        }
+      }
+      // 二级缓存获取不到，就从simpleExecutor中执行（查询一级缓存或查数据库等）
+      List<E> list = delegate.<E> query(ms, parameterObject, rowBounds, resultHandler, key, boundSql);
+      // 提交缓存到tcm，注意tcm需要二阶段提交，并没有真正保存的cache中，等到tcm.commit/rollback时才会提交缓存
+      tcm.putObject(cache, key, list); // issue #578. Query must be not synchronized to prevent deadlocks
+      return list;
+    }
+  }
+  return delegate.<E>query(ms, parameterObject, rowBounds, resultHandler, key, boundSql);
+}
+```
+
+> 注意：
+>
+> 1. 二级缓存的cache保存在MappedStatement中，但是在同一个nameSpace下注入的cache都是同一个，这样达到cache在不同Session之间共享的目的。
+> 2. 同时所有的cache都在Configuration中的cacheMap保存，key就是NameSpace，其中我们可以通过`<cache-ref>`标签来指定NameSpace，进而获取对应的cache。
+> 3. 二级缓存，当Session提交之后才会put到二级缓存，否则缓存是空的。而一级缓存没有此限制。
+
+##### 配置与使用
+
+1. Mybatis-config.xml中配置	=> 	开启二级缓存
+
+```xml
+<setting name="cacheEnabled" value="true"/>
+```
+
+2. 在Mapper文件中配置cache或者cache-ref	=> 用于声明这个namespace使用二级缓存
+
+```xml
+<!-- 该NameSpace开启二级缓存 -->
+<cache/>   
+<!-- cache-ref代表引用别的命名空间的Cache配置，两个命名空间的操作使用的是同一个Cache。 -->
+<cache-ref namespace="mapper.StudentMapper"/>
+```
+
+- cache-ref
+
+  相当于多个NameSpace共用同一个缓存，缓存粒度更粗，意味这多个Mapper NameSpace下的所有操作都会对缓存使用造成影响。
+
+
 
 
 

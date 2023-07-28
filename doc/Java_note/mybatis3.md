@@ -2775,6 +2775,42 @@ public <E> List<E> query(MappedStatement ms, Object parameterObject, RowBounds r
 
   相当于多个NameSpace共用同一个缓存，缓存粒度更粗，意味这多个Mapper NameSpace下的所有操作都会对缓存使用造成影响。
 
+# 核心处理层
+
+## 动态SQL
+
+MyBatis 在初始化过程中，会将 Mapper 映射文件中定义的 SQL 语句解析成 `SqlSource` 对象，其中动态标签、SQL 语句文本等，会被解析成对应类型的 `SqlNode` 对象。
+
+### DynamicContext
+
+MyBatis 解析 SQL 的链路很长，过程中需要将解析结果缓存，供上下文使用，承担该上下文的对象就是，`org.apache.ibatis.scripting.xmltags.DynamicContext`。
+
+### SqlNode
+
+```java
+public interface SqlNode {
+    // 传入DynamicContext，将解析的 SQL 片段用 context.sqlBuilder 拼接，
+    // 全部的动态SQL片段都解析完成之后，就可以从DynamicContext.sqlBuilder字段中得到完整的SQL
+    boolean apply(DynamicContext context);
+}
+```
+
+- SqlNode 相关实现
+
+![image-20230728171743461](material/MyBatis/SqlNode相关实现类.png)
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

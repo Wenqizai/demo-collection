@@ -1,6 +1,7 @@
 package com.wenqi.test.mybatis;
 
 import com.alibaba.fastjson.JSON;
+import org.apache.commons.lang3.RandomUtils;
 import org.apache.ibatis.io.Resources;
 import org.apache.ibatis.session.SqlSession;
 import org.apache.ibatis.session.SqlSessionFactory;
@@ -37,7 +38,9 @@ public class Main {
       sqlSession = sqlSessionFactory.openSession();
 
       // 业务方法
-      test01(sqlSession);
+//      test01(sqlSession);
+//      testInsert(sqlSession);
+      testDtoSelect(sqlSession);
 
       sqlSession.commit();
 
@@ -48,6 +51,22 @@ public class Main {
     } finally {
       sqlSession.close();
     }
+  }
+
+  private static void testDtoSelect(SqlSession sqlSession) {
+    RoleMapper roleMapper = sqlSession.getMapper(RoleMapper.class);
+    Role role = new Role();
+    role.setRoleName("张");
+    role.setNote("test select key");
+    roleMapper.selectByRole(role);
+  }
+
+  private static void testInsert(SqlSession sqlSession) {
+    RoleMapper roleMapper = sqlSession.getMapper(RoleMapper.class);
+    Role role = new Role();
+    role.setRoleName("张山-" + RandomUtils.nextInt(0, 1000));
+    role.setNote("test select key");
+    roleMapper.insertRole(role);
   }
 
   /**

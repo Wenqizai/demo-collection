@@ -2781,9 +2781,22 @@ public <E> List<E> query(MappedStatement ms, Object parameterObject, RowBounds r
 
 MyBatis 在初始化过程中，会将 Mapper 映射文件中定义的 SQL 语句解析成 `SqlSource` 对象，其中动态标签、SQL 语句文本等，会被解析成对应类型的 `SqlNode` 对象。
 
+我们知道仅用于一个个的 SqlNode 还不足以得到我们需要执行的 SQL 。真正执行的 SQL 是已经绑定用户参数的可执行的SQL 。这是需要将这些 SqlNode 组织起来并绑定参数的功能类。
+
+而MyBatis中的`SqlSource`承担此功能。
+
 ### DynamicContext
 
 MyBatis 解析 SQL 的链路很长，过程中需要将解析结果缓存，供上下文使用，承担该上下文的对象就是，`org.apache.ibatis.scripting.xmltags.DynamicContext`。
+
+构建时机：MyBatis 启动过程中，在解析  Mapper 中 SQL 时构建，具体入口：`org.apache.ibatis.builder.xml.XMLMapperBuilder#buildStatementFromContext(java.util.List<org.apache.ibatis.parsing.XNode>)`
+
+==**注：**==其中负责解析 SQL 语句地方：`org.apache.ibatis.builder.xml.XMLStatementBuilder#parseStatementNode`。如下可以看到解析完的 SQL 会返回一个 `SqlSource`。（各类的 SqlNode 也在这方法里面完成组装。）
+
+```java
+// Parse the SQL (pre: <selectKey> and <include> were parsed and removed)
+SqlSource sqlSource = langDriver.createSqlSource(configuration, context, parameterTypeClass);
+```
 
 ### SqlNode
 
@@ -2799,7 +2812,83 @@ public interface SqlNode {
 
 ![image-20230728171743461](material/MyBatis/SqlNode相关实现类.png)
 
+- 组装 SqlNode 的入口
 
+`org.apache.ibatis.scripting.xmltags.XMLScriptBuilder`
+
+```java
+public SqlSource createSqlSource(Configuration configuration, XNode script, Class<?> parameterType) {
+  XMLScriptBuilder builder = new XMLScriptBuilder(configuration, script, parameterType);
+  return builder.parseScriptNode();
+}
+
+public SqlSource parseScriptNode() {
+  // 解析动态sql标签， 见下面的 NodeHandler
+  List<SqlNode> contents = parseDynamicTags(context);
+  // 拼接sqlNode
+  MixedSqlNode rootSqlNode = new MixedSqlNode(contents);
+  SqlSource sqlSource = null;
+  if (isDynamic) {
+    sqlSource = new DynamicSqlSource(configuration, rootSqlNode);
+  } else {
+    sqlSource = new RawSqlSource(configuration, rootSqlNode, parameterType);
+  }
+  return sqlSource;
+}
+```
+
+#### 动态标签处理器NodeHandler
+
+我们知道我们可以在 mapper.xml 定义一些动态标签，来达到执行动态 SQL 的目的，常用的动态标签如：`where | if | foreach | set` 等。每个标签都有不同的解析和拼接方式，MyBatis 是使用 NodeHandler 来完成这些动态 SQL 的拼接。
+
+`org.apache.ibatis.scripting.xmltags.XMLScriptBuilder.NodeHandler` 
+
+NodeHandler 是定义在 XMLScriptBuilder 中的私有接口，并维护解析不同动态标签的 Handler。
+
+```java
+private interface NodeHandler {
+  void handleNode(XNode nodeToHandle, List<SqlNode> targetContents);
+}
+
+private Map<String, NodeHandler> nodeHandlers = new HashMap<String, NodeHandler>() {
+  private static final long serialVersionUID = 7123056019193266281L;
+
+  {
+    put("trim", new TrimHandler());
+    put("where", new WhereHandler());
+    put("set", new SetHandler());
+    put("foreach", new ForEachHandler());
+    put("if", new IfHandler());
+    put("choose", new ChooseHandler());
+    put("when", new IfHandler());
+    put("otherwise", new OtherwiseHandler());
+    put("bind", new BindHandler());
+  }
+};
+```
+
+### SqlSource
+
+SqlSource 负责组装解析后的每个 sqlNode，以如下动态 SQL ，返回的 DynamicSqlSource 为例，展示 SqlSource 的数据结构。 
+
+```xml
+<select id="selectByRole" resultType="wenqitest.Role">
+  select * from role
+    <where>
+      <if test="id != null">
+        AND id = #{id,javaType=long}
+      </if>
+      <if test="roleName != null and roleName != ''">
+        AND role_name like concat('%', #{roleName,jdbcType=VARCHAR}, '%')
+      </if>
+      <if test="note != null and note != ''">
+        AND note = #{note,jdbcType=VARCHAR}
+      </if>
+    </where>
+</select>
+```
+
+![image-20230730152824128](material/MyBatis/SqlSource数据结构.png)
 
 
 

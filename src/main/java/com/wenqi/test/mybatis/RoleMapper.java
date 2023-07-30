@@ -1,7 +1,6 @@
 package com.wenqi.test.mybatis;
 
 import org.apache.ibatis.annotations.Param;
-import org.apache.ibatis.annotations.Select;
 
 import java.util.List;
 
@@ -10,7 +9,7 @@ import java.util.List;
  * @date 2023/4/14
  */
 public interface RoleMapper {
-    @Select("select id, role_name as roleNaccme, note from role where id = #{id,jdbcType=BIGINT}")
+    //    @Select("select id, role_name as roleNaccme, note from role where id = #{id,jdbcType=BIGINT}")
     public Role getRole(Long id);
 
     public Role findRole(String roleName);
@@ -21,4 +20,5 @@ public interface RoleMapper {
 
     List<Role> selectRoleById(@Param("list") List<Long> ids);
 
+    List<Role> selectByRole(Role role);
 }

@@ -2783,7 +2783,7 @@ MyBatis 在初始化过程中，会将 Mapper 映射文件中定义的 SQL 语�
 
 我们知道仅用于一个个的 SqlNode 还不足以得到我们需要执行的 SQL 。真正执行的 SQL 是已经绑定用户参数的可执行的SQL 。这是需要将这些 SqlNode 组织起来并绑定参数的功能类。
 
-而MyBatis中的`SqlSource`承担此功能。
+而MyBatis中的`SqlSource`承担此功能（注意：这里的 SqlSource 只是拥有 SqlNode 的引用而已，真正触发动态 SQL 的拼接是`SqlSource.getBoundSql()` 的调用）。
 
 ### DynamicContext
 
@@ -2867,6 +2867,109 @@ private Map<String, NodeHandler> nodeHandlers = new HashMap<String, NodeHandler>
 };
 ```
 
+#### MixedSqlNode
+
+**MixedSqlNode 在整个 SqlNode 树中充当了树枝节点，也就是扮演了组合模式中 Composite 的角色**，其中维护了一个 `List<SqlNode>` 集合用于记录 MixedSqlNode 下所有的子 SqlNode 对象。
+
+`MixedSqlNode.apply()` ：核心逻辑就是遍历 `List<SqlNode>` 集合中全部的子 SqlNode 对象并调用 apply() 方法，由子 SqlNode 对象完成真正的动态 SQL 处理逻辑。
+
+```java
+public class MixedSqlNode implements SqlNode {
+  private List<SqlNode> contents;
+
+  public MixedSqlNode(List<SqlNode> contents) {
+    this.contents = contents;
+  }
+
+  public boolean apply(DynamicContext context) {
+    for (SqlNode sqlNode : contents) {
+      sqlNode.apply(context);
+    }
+    return true;
+  }
+}
+```
+
+#### StaticTextSqlNode
+
+StaticTextSqlNode 用来表示非动态 SQL 片段，成员变量只有 text，用来保存 SQL 的文本。
+
+`StaticTextSqlNode.apply()` ：核心逻辑，使用 DynamicContext.sqlBuilder 来拼接 sql 文本片段。
+
+```java
+public class StaticTextSqlNode implements SqlNode {
+  private String ;
+
+  public StaticTextSqlNode(String text) {
+    this.text = text;
+  }
+
+  public boolean apply(DynamicContext context) {
+    context.appendSql(text);
+    return true;
+  }
+}
+```
+
+#### TextSqlNode
+
+TextSqlNode 用来解析包含 `${}` 占位符的动态 SQL 片段。成员变量 text 记录占位符的 SQL 文本内容，如：`AND note = ${note}`
+
+`TextSqlNode.apply()` ：核心逻辑，使用**用户传入的实参**替换 text 中占位符 `${}`的内容（如：`AND note = 'param'`），并 DynamicContext.sqlBuilder 来拼接 sql 文本片段。
+
+```java
+public class TextSqlNode implements SqlNode {
+  private String text;
+
+  public boolean apply(DynamicContext context) {
+    // 创建 ${} 的解析器
+    GenericTokenParser parser = createParser(new BindingTokenParser(context));
+    // 解析并替换 ${} 里面的内容
+    context.appendSql(parser.parse(text));
+    return true;
+  }
+
+  // 这里解析出来 ${} 里面填充的内容，此时发生在 SQL 调用执行过程中，
+  // 故 context.getBindings().get("_parameter") 可以获取到调用的传参
+  public String handleToken(String content) {
+    Object parameter = context.getBindings().get("_parameter");
+    if (parameter == null) {
+      context.getBindings().put("value", null);
+    } else if (SimpleTypeRegistry.isSimpleType(parameter.getClass())) {
+      context.getBindings().put("value", parameter);
+    }
+    Object value = OgnlCache.getValue(content, context.getBindings());
+    return (value == null ? "" : String.valueOf(value)); // issue #274 return "" instead of "null"
+  }
+}
+```
+
+#### IfSqlNode
+
+IfSqlNode：用来解析`<if>`标签动态 SQL 片段。成员变量 test 记录 if 的判断条件，如：`note != null and note != ''`，条件的解析器为 evaluator。而 contents 这是链接到下一个的 SqlNode，因为当 if 条件满足时我们需要执行`<if>`标签中的内容，而 contents 则是标签内容的 SqlNode。
+
+`IfSqlNode.apply()` ：核心逻辑，使用 evaluator 计算保存的 test 条件，true 则下一个节点的apply 方法 `contents.apply()`。
+
+```java
+public class IfSqlNode implements SqlNode {
+  private ExpressionEvaluator evaluator;
+  private String test;
+  private SqlNode contents;
+
+  public boolean apply(DynamicContext context) {
+    if (evaluator.evaluateBoolean(test, context.getBindings())) {
+      contents.apply(context);
+      return true;
+    }
+    return false;
+  }
+}
+```
+
+
+
+
+
 ### SqlSource
 
 SqlSource 负责组装解析后的每个 sqlNode，以如下动态 SQL ，返回的 DynamicSqlSource 为例，展示 SqlSource 的数据结构。 
@@ -2890,7 +2993,9 @@ SqlSource 负责组装解析后的每个 sqlNode，以如下动态 SQL ，返回
 
 ![image-20230730152824128](material/MyBatis/SqlSource数据结构.png)
 
+等到执行过程中调用`SqlSource.getBoundSql()`，才会触发动态 SQL 的拼接，从节点 MixedSqlNode 开始，逐一执行 `SqlNode.apply()` 完成整个 SQL 的拼接，调用栈如下：
 
+![image-20230730171052424](material/MyBatis/动态SQL调用栈.png)
 
 
 

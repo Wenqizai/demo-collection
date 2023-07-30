@@ -57,7 +57,7 @@ public class Main {
     RoleMapper roleMapper = sqlSession.getMapper(RoleMapper.class);
     Role role = new Role();
     role.setRoleName("张");
-    role.setNote("test select key");
+    role.setNote("AND note = 'test select key'");
     roleMapper.selectByRole(role);
   }
 

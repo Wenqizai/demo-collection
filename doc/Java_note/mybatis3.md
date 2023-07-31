@@ -2839,7 +2839,7 @@ public SqlSource parseScriptNode() {
 
 #### 动态标签处理器NodeHandler
 
-我们知道我们可以在 mapper.xml 定义一些动态标签，来达到执行动态 SQL 的目的，常用的动态标签如：`where | if | foreach | set` 等。每个标签都有不同的解析和拼接方式，MyBatis 是使用 NodeHandler 来完成这些动态 SQL 的拼接。
+我们知道我们可以在 mapper.xml 定义一些动态标签，来达到执行动态 SQL 的目的，常用的动态标签如：`where | if | foreach | set` 等。每个标签都有不同的解析和拼接方式，MyBatis 是使用 NodeHandler 来完成构建一个个的 SqlNode。
 
 `org.apache.ibatis.scripting.xmltags.XMLScriptBuilder.NodeHandler` 
 
@@ -2966,9 +2966,118 @@ public class IfSqlNode implements SqlNode {
 }
 ```
 
+#### TrimSqlNode
+
+TrimSqlNode 用来裁剪标签定义的 SQL。
+
+`StaticTextSqlNode.apply()` ：核心逻辑，使用 DynamicContext.sqlBuilder 来拼接 sql 文本片段。
+
+```java
+public class TrimSqlNode implements SqlNode {
+
+    private final SqlNode contents;
+    private final String prefix;
+    private final String suffix;
+    private final List<String> prefixesToOverride;
+    private final List<String> suffixesToOverride;
+    private final Configuration configuration;
+
+    @Override
+    public boolean apply(DynamicContext context) {
+        // 创建处理裁剪的上下文
+        FilteredDynamicContext filteredDynamicContext = new FilteredDynamicContext(context);
+        // 处理裁剪标签类的 SQL 片段，拼接在一起完成未处理过裁剪的 SQL 片段的组装
+        boolean result = contents.apply(filteredDynamicContext);
+        // j裁剪
+        filteredDynamicContext.applyAll();
+        return result;
+    }
+
+	// 上下文的子类，专门用来处理裁剪
+    private class FilteredDynamicContext extends DynamicContext {
+        // 代理类，SQL 拼接完成之后还是要放入此类中
+        private DynamicContext delegate;
+        // 是否已经处理过了前缀
+        private boolean prefixApplied;
+        // 是否已经处理过了后缀
+        private boolean suffixApplied;
+        // raw SQL 片段的拼接（未处理过裁剪的 SQL 片段）
+        private StringBuilder sqlBuffer;
+
+        // 处理裁剪的核心方法
+        public void applyAll() {
+            sqlBuffer = new StringBuilder(sqlBuffer.toString().trim());
+            String trimmedUppercaseSql = sqlBuffer.toString().toUpperCase(Locale.ENGLISH);
+            if (trimmedUppercaseSql.length() > 0) {
+                // 处理前缀
+                applyPrefix(sqlBuffer, trimmedUppercaseSql);
+                // 处理后缀
+                applySuffix(sqlBuffer, trimmedUppercaseSql);
+            }
+            // 完成 SQL 拼接后，拼接到 DynamicContext 中
+            delegate.appendSql(sqlBuffer.toString());
+        }
+
+        // prefixesToOverride 不为空，语句前面裁剪指定的 prefixesToOverride
+        // prefix 不为空，语句前面拼接指定的 prefix
+        private void applyPrefix(StringBuilder sql, String trimmedUppercaseSql) {
+            if (!prefixApplied) {
+                prefixApplied = true;
+                if (prefixesToOverride != null) {
+                    for (String toRemove : prefixesToOverride) {
+                        if (trimmedUppercaseSql.startsWith(toRemove)) {
+                            sql.delete(0, toRemove.trim().length());
+                            break;
+                        }
+                    }
+                }
+                if (prefix != null) {
+                    sql.insert(0, " ");
+                    sql.insert(0, prefix);
+                }
+            }
+        }
+
+        // suffixesToOverride 不为空，语句后面裁剪指定的 suffixesToOverride
+        // suffix 不为空，语句后面拼接指定的 suffix
+        private void applySuffix(StringBuilder sql, String trimmedUppercaseSql) {
+            if (!suffixApplied) {
+                suffixApplied = true;
+                if (suffixesToOverride != null) {
+                    for (String toRemove : suffixesToOverride) {
+                        if (trimmedUppercaseSql.endsWith(toRemove) || trimmedUppercaseSql.endsWith(toRemove.trim())) {
+                            int start = sql.length() - toRemove.trim().length();
+                            int end = sql.length();
+                            sql.delete(start, end);
+                            break;
+                        }
+                    }
+                }
+                if (suffix != null) {
+                    sql.append(" ");
+                    sql.append(suffix);
+                }
+            }
+        }
+    }
+}
+```
 
 
 
+> `<trim>`标签的裁剪解析
+
+`prefixOverrides` 和 `suffixOverrides`：前后缀覆盖标识，可以 “|” 分隔多个；
+
+`prefix` 和 `suffix`：用来覆盖的前后缀
+
+如下例，覆盖重写后的SQL：`(note = #{note})`；`AND` 被前缀 `(` 覆盖；`,` 被后缀 `)` 覆盖。
+
+```xml
+<trim prefix="(" prefixOverrides="AND|OR" suffix=")" suffixOverrides=",">
+	AND note = #{note},
+</trim>
+```
 
 ### SqlSource
 

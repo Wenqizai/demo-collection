@@ -2787,7 +2787,7 @@ MyBatis 在初始化过程中，会将 Mapper 映射文件中定义的 SQL 语�
 
 ### DynamicContext
 
-MyBatis 解析 SQL 的链路很长，过程中需要将解析结果缓存，供上下文使用，承担该上下文的对象就是，`org.apache.ibatis.scripting.xmltags.DynamicContext`。
+MyBatis 解析**动态** SQL 的链路很长，过程中需要将解析结果缓存，供上下文使用，承担该上下文的对象就是，`org.apache.ibatis.scripting.xmltags.DynamicContext`。
 
 构建时机：MyBatis 启动过程中，在解析  Mapper 中 SQL 时构建，具体入口：`org.apache.ibatis.builder.xml.XMLMapperBuilder#buildStatementFromContext(java.util.List<org.apache.ibatis.parsing.XNode>)`
 
@@ -2796,6 +2796,40 @@ MyBatis 解析 SQL 的链路很长，过程中需要将解析结果缓存，供�
 ```java
 // Parse the SQL (pre: <selectKey> and <include> were parsed and removed)
 SqlSource sqlSource = langDriver.createSqlSource(configuration, context, parameterTypeClass);
+```
+
+- 上下文 DynamicContext 保存的信息
+
+```java
+public class DynamicContext {
+	// 绑定实参的key
+    public static final String PARAMETER_OBJECT_KEY = "_parameter";
+    public static final String DATABASE_ID_KEY = "_databaseId";
+
+    static {
+        OgnlRuntime.setPropertyAccessor(ContextMap.class, new ContextAccessor());
+    }
+
+    // 保存实参绑定的信息, 因为 PreparedStatement 防止 SQL 注入问题, 故参数不可直接拼接, 需要暂时在这里
+    // sql 调用时再 set 进入
+    private final ContextMap bindings;
+    // 用来拼接SQL
+    private final StringJoiner sqlBuilder = new StringJoiner(" ");
+    // 标识数字, 拼接 for_each 参数时会用到
+    private int uniqueNumber = 0;
+
+    public DynamicContext(Configuration configuration, Object parameterObject) {
+        if (parameterObject != null && !(parameterObject instanceof Map)) {
+            MetaObject metaObject = configuration.newMetaObject(parameterObject);
+            boolean existsTypeHandler = configuration.getTypeHandlerRegistry().hasTypeHandler(parameterObject.getClass());
+            bindings = new ContextMap(metaObject, existsTypeHandler);
+        } else {
+            bindings = new ContextMap(null, false);
+        }
+        bindings.put(PARAMETER_OBJECT_KEY, parameterObject);
+        bindings.put(DATABASE_ID_KEY, configuration.getDatabaseId());
+    }
+}
 ```
 
 ### SqlNode
@@ -2988,7 +3022,7 @@ public class TrimSqlNode implements SqlNode {
         FilteredDynamicContext filteredDynamicContext = new FilteredDynamicContext(context);
         // 处理裁剪标签类的 SQL 片段，拼接在一起完成未处理过裁剪的 SQL 片段的组装
         boolean result = contents.apply(filteredDynamicContext);
-        // j裁剪
+        // 进行裁剪操作
         filteredDynamicContext.applyAll();
         return result;
     }
@@ -3063,8 +3097,6 @@ public class TrimSqlNode implements SqlNode {
 }
 ```
 
-
-
 > `<trim>`标签的裁剪解析
 
 `prefixOverrides` 和 `suffixOverrides`：前后缀覆盖标识，可以 “|” 分隔多个；
@@ -3078,6 +3110,131 @@ public class TrimSqlNode implements SqlNode {
 	AND note = #{note},
 </trim>
 ```
+
+##### SetSqlNode & WhereSqlNode
+
+SetSqlNode 和 WhereSqlNode 均继承于 TrimSqlNode，两者构造时仅改变前后缀的属性，其他行为与 TrimSqlNode 是一致的。
+
+```java
+public class SetSqlNode extends TrimSqlNode {
+
+    private static final List<String> COMMA = Collections.singletonList(",");
+
+    public SetSqlNode(Configuration configuration,SqlNode contents) {
+        super(configuration, contents, "SET", COMMA, null, COMMA);
+    }
+}
+
+public class WhereSqlNode extends TrimSqlNode {
+
+    private static List<String> prefixList = Arrays.asList("AND ","OR ","AND\n", "OR\n", "AND\r", "OR\r", "AND\t", "OR\t");
+
+    public WhereSqlNode(Configuration configuration, SqlNode contents) {
+        super(configuration, contents, "WHERE", prefixList, null, null);
+    }
+
+}
+```
+
+#### ForEachSqlNode
+
+ForEachSqlNode：主要用来拼接和遍历`<foreach>`标签下集合元素。
+
+`ForEachSqlNode.apply()` ：核心逻辑，使用 evaluator 计算保存的 test 条件，true 则下一个节点的apply 方法 `contents.apply()`。
+
+
+
+
+
+
+
+```java
+public class ForEachSqlNode implements SqlNode {
+    public static final String ITEM_PREFIX = "__frch_";
+
+    // 表达式解析器，这里主要用来解析 collection 属性的 idsList
+    private final ExpressionEvaluator evaluator;
+    // collection 表达式，idsList
+    private final String collectionExpression;
+    // foreach 标签下的 sqlNode
+    private final SqlNode contents;
+    // foreach 标签类属性
+    private final String open;
+    private final String close;
+    private final String separator;
+    private final String item;
+    private final String index;
+    // mybatis 属性
+    private final Configuration configuration;
+
+
+    @Override
+    public boolean apply(DynamicContext context) {
+        // 获取上下文绑定的 Map
+        Map<String, Object> bindings = context.getBindings();
+        // 获取 collection 属性对应传入的实参
+        final Iterable<?> iterable = evaluator.evaluateIterable(collectionExpression, bindings);
+        if (!iterable.iterator().hasNext()) {
+            return true;
+        }
+        boolean first = true;
+        // 1. 拼接 open 属性
+        applyOpen(context);
+        int i = 0;
+        for (Object o : iterable) {
+            DynamicContext oldContext = context;
+            if (first || separator == null) {
+                context = new PrefixedContext(context, "");
+            } else {
+                context = new PrefixedContext(context, separator);
+            }
+            int uniqueNumber = context.getUniqueNumber();
+            // Issue #709
+            if (o instanceof Map.Entry) {
+                @SuppressWarnings("unchecked")
+                Map.Entry<Object, Object> mapEntry = (Map.Entry<Object, Object>) o;
+                applyIndex(context, mapEntry.getKey(), uniqueNumber);
+                applyItem(context, mapEntry.getValue(), uniqueNumber);
+            } else {
+                applyIndex(context, i, uniqueNumber);
+                applyItem(context, o, uniqueNumber);
+            }
+            contents.apply(new FilteredDynamicContext(configuration, context, index, item, uniqueNumber));
+            if (first) {
+                first = !((PrefixedContext) context).isPrefixApplied();
+            }
+            context = oldContext;
+            i++;
+        }
+        applyClose(context);
+        context.getBindings().remove(item);
+        context.getBindings().remove(index);
+        return true;
+    }
+}
+```
+
+- foreach 使用示例
+
+```xml
+<foreach collection="idsList" item="item" separator="," open="(" close=")">
+  #{item,jdbcType=BIGINT}
+</foreach>
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 ### SqlSource
 

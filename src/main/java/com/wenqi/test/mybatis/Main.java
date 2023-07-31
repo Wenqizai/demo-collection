@@ -10,6 +10,7 @@ import org.apache.log4j.BasicConfigurator;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
@@ -51,6 +52,19 @@ public class Main {
     } finally {
       sqlSession.close();
     }
+  }
+
+  private static void testBatch(SqlSession sqlSession) {
+    RoleMapper roleMapper = sqlSession.getMapper(RoleMapper.class);
+    List<Role> roleList = new ArrayList<>();
+    for (int i = 0; i < 3; i++) {
+      Role role = new Role();
+      role.setRoleName("张-" + i);
+      role.setNote("test insert " + i);
+      roleList.add(role);
+    }
+    roleMapper.batchInsert(roleList);
+    roleMapper.selectByIds(Arrays.asList(1L, 2L, 3L));
   }
 
   private static void testDtoSelect(SqlSession sqlSession) {

@@ -62,4 +62,31 @@
         </where>
     </select>
 
+    <update id="updateByRole">
+        update role
+        <set>
+            <if test="roleName != null and roleName != ''">
+                role_name = #{roleName,jdbcType=VARCHAR}   ,
+            </if>
+            <if test="note != null and note != ''">
+                note = #{note,jdbcType=VARCHAR}  ,
+            </if>
+        </set>
+        where id = #{id,jdbcType=INTEGER}
+    </update>
+
+    <insert id="batchInsert">
+        insert into role (role_name, note) values
+        <foreach collection="roleList" separator="," item="item">
+            (#{item.roleName,jdbcType=VARCHAR}, #{item.note,jdbcType=VARCHAR})
+        </foreach>
+    </insert>
+
+    <select id="selectByIds" resultType="com.wenqi.test.mybatis.Role">
+        select * from role where id in
+        <foreach collection="idsList" item="item" separator="," open="(" close=")">
+            #{item,jdbcType=BIGINT}
+        </foreach>
+    </select>
+
 </mapper>

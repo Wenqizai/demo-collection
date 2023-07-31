@@ -21,4 +21,10 @@ public interface RoleMapper {
     List<Role> selectRoleById(@Param("list") List<Long> ids);
 
     List<Role> selectByRole(Role role);
+
+    Integer updateByRole(Role role);
+
+    Integer batchInsert(@Param("roleList") List<Role> roleList);
+
+    List<Role> selectByIds(@Param("idsList") List<Long> idsList);
 }

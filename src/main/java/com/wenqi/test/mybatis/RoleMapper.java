@@ -27,4 +27,6 @@ public interface RoleMapper {
     Integer batchInsert(@Param("roleList") List<Role> roleList);
 
     List<Role> selectByIds(@Param("idsList") List<Long> idsList);
+
+    List<Role> selectByCondition(RoleConditionDto roleConditionDto);
 }

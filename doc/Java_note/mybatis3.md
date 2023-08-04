@@ -3375,11 +3375,59 @@ private static class FilteredDynamicContext extends DynamicContext {
 }
 ```
 
+#### ChooseSqlNode
 
+ChooseSqlNode：主要用来处理`<choose>、<when>、<otherwise>`等标签下 SQL 片段的选择。
 
+`ForEachSqlNode.apply()` ：核心逻辑，当有一个`<when>`标签，即 defaultSqlNode，生效之后直接返回，否则应用`<otherwise>`标签，即 ifSqlNodes。当然`<otherwise>`标签亦可不写。
 
+关于 ifSqlNodes 和 defaultSqlNode 的划分，可参考处理器： `org.apache.ibatis.scripting.xmltags.XMLScriptBuilder.ChooseHandler`。
 
+- sql
 
+```xml
+<select id="selectByCondition" resultType="wenqi.Role">
+  select * from role
+  <where>
+    <choose>
+      <when test="noteCondition != null and noteCondition == 1">
+        and note like '0'
+      </when>
+      <when test="noteCondition != null and noteCondition == 2">
+        and note like '1'
+      </when>
+      <otherwise>
+        and note like '张'
+      </otherwise>
+    </choose>
+  </where>
+</select>
+```
+
+- ChooseSqlNode
+
+```java
+public class ChooseSqlNode implements SqlNode {
+	// <otherwise> 标签的节点
+    private final SqlNode defaultSqlNode;
+    // <when> 标签的节点，处理与 ifSqlNode 一致
+    private final List<SqlNode> ifSqlNodes;
+
+    @Override
+    public boolean apply(DynamicContext context) {
+        for (SqlNode sqlNode : ifSqlNodes) {
+            if (sqlNode.apply(context)) {
+                return true;
+            }
+        }
+        if (defaultSqlNode != null) {
+            defaultSqlNode.apply(context);
+            return true;
+        }
+        return false;
+    }
+}
+```
 
 
 

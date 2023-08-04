@@ -41,7 +41,8 @@ public class Main {
       // 业务方法
 //      test01(sqlSession);
 //      testInsert(sqlSession);
-      testDtoSelect(sqlSession);
+//      testDtoSelect(sqlSession);
+      testCondition(sqlSession);
 
       sqlSession.commit();
 
@@ -52,6 +53,13 @@ public class Main {
     } finally {
       sqlSession.close();
     }
+  }
+
+  private static void testCondition(SqlSession sqlSession) {
+    RoleMapper roleMapper = sqlSession.getMapper(RoleMapper.class);
+    RoleConditionDto roleConditionDto = new RoleConditionDto();
+    roleConditionDto.setNoteCondition(1);
+    roleMapper.selectByCondition(roleConditionDto);
   }
 
   private static void testBatch(SqlSession sqlSession) {

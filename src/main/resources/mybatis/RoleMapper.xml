@@ -89,4 +89,21 @@
         </foreach>
     </select>
 
+    <select id="selectByCondition" resultType="com.wenqi.test.mybatis.Role">
+        select * from role
+        <where>
+            <choose>
+                <when test="noteCondition != null and noteCondition == 1">
+                    and note like '0'
+                </when>
+                <when test="noteCondition != null and noteCondition == 2">
+                    and note like '1'
+                </when>
+                <otherwise>
+                    and note like '张'
+                </otherwise>
+            </choose>
+        </where>
+    </select>
+
 </mapper>

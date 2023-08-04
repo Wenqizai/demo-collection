@@ -3140,13 +3140,41 @@ public class WhereSqlNode extends TrimSqlNode {
 
 ForEachSqlNode：主要用来拼接和遍历`<foreach>`标签下集合元素。
 
-`ForEachSqlNode.apply()` ：核心逻辑，使用 evaluator 计算保存的 test 条件，true 则下一个节点的apply 方法 `contents.apply()`。
+`ForEachSqlNode.apply()` ：核心逻辑，解析并拼接`<foreach>`内容，将传入的实参存入`ContextMap bindings`中，以供 SQL 绑定时调用。
 
 
+- foreach 使用示例
 
+```xml
+-> 原生 SQL
 
+select * from role where id  in 
+<foreach collection="idsList" item="item" separator="," open="(" close=")">
+  #{item,jdbcType=BIGINT}
+</foreach>
 
+-> ForEachSqlNode 处理后：
+select * from role where id  in 
+ （#{__frch_item_0,jdbcType=BIGINT}， #{__frch_item_1,jdbcType=BIGINT}， #{__frch_item_2,jdbcType=BIGINT}）
 
+-> bindings 的存储：
+
+见下述
+```
+
+- Session 周期 bindings 的存储
+
+如下图可知：在使用`<foreach>`标签时，我们传入的实参 idList 被存储了3份在 ContextMap bindings 中。
+
+**所以我们使用多线程SQL查询, 当 in 条件数量过大时，尤其遇上慢 SQL，内存得不到释放，极有可能造成 OOM。**
+
+```json
+{_parameter={roleName=张, idsList=[1, 2, 3], param1=[1, 2, 3], param2=张}, __frch_item_2=3, __frch_item_1=2, _databaseId=mysql, __frch_item_0=1}
+```
+
+![image-20230804154944287](material/MyBatis/ForEachSqlNode绑定参数.png)
+
+- ForEachSqlNode
 
 ```java
 public class ForEachSqlNode implements SqlNode {
@@ -3182,12 +3210,17 @@ public class ForEachSqlNode implements SqlNode {
         applyOpen(context);
         int i = 0;
         for (Object o : iterable) {
+            // 保存原有的 context 因为要更换新的 context 来处理标签内容
             DynamicContext oldContext = context;
+            
+            // 处理前缀拼接的 context, 用来拼接 separator 属性
             if (first || separator == null) {
                 context = new PrefixedContext(context, "");
             } else {
                 context = new PrefixedContext(context, separator);
             }
+            
+            // 传入的实参绑定 item，保存到 map 中
             int uniqueNumber = context.getUniqueNumber();
             // Issue #709
             if (o instanceof Map.Entry) {
@@ -3199,14 +3232,21 @@ public class ForEachSqlNode implements SqlNode {
                 applyIndex(context, i, uniqueNumber);
                 applyItem(context, o, uniqueNumber);
             }
+            
+            // apply mixsqlnode
             contents.apply(new FilteredDynamicContext(configuration, context, index, item, uniqueNumber));
+            
             if (first) {
                 first = !((PrefixedContext) context).isPrefixApplied();
             }
+            
+            // 找回原来的 context
             context = oldContext;
             i++;
         }
+        // 拼接 close 属性
         applyClose(context);
+        // 这里的 item 和 index 主要是用来拼接 #{} 的属性, 使用完需要 remove d
         context.getBindings().remove(item);
         context.getBindings().remove(index);
         return true;
@@ -3214,19 +3254,126 @@ public class ForEachSqlNode implements SqlNode {
 }
 ```
 
-- foreach 使用示例
+##### 处理拼接的context
 
-```xml
-<foreach collection="idsList" item="item" separator="," open="(" close=")">
-  #{item,jdbcType=BIGINT}
-</foreach>
+> PrefixedContext
+
+处理前缀拼接，如：foreach 标签的 separator
+
+注意有些操作是 `DynamicContext delegate`。
+
+appendSql：将 separator 拼接在前面。
+
+```java
+private class PrefixedContext extends DynamicContext {
+    private final DynamicContext delegate;
+    private final String prefix;
+    private boolean prefixApplied;
+
+    public PrefixedContext(DynamicContext delegate, String prefix) {
+        super(configuration, null);
+        this.delegate = delegate;
+        this.prefix = prefix;
+        this.prefixApplied = false;
+    }
+
+    public boolean isPrefixApplied() {
+        return prefixApplied;
+    }
+
+    @Override
+    public Map<String, Object> getBindings() {
+        return delegate.getBindings();
+    }
+
+    @Override
+    public void bind(String name, Object value) {
+        delegate.bind(name, value);
+    }
+
+    @Override
+    public void appendSql(String sql) {
+        if (!prefixApplied && sql != null && sql.trim().length() > 0) {
+            delegate.appendSql(prefix);
+            prefixApplied = true;
+        }
+        delegate.appendSql(sql);
+    }
+
+    @Override
+    public String getSql() {
+        return delegate.getSql();
+    }
+
+    @Override
+    public int getUniqueNumber() {
+        return delegate.getUniqueNumber();
+    }
+}
 ```
 
+> FilteredDynamicContext
 
+处理占位符拼接，如 #{}
 
+注意有些操作是 `DynamicContext delegate`。
 
+appendSql：就是把指定的占位符，替换成 MyBatis 特定的占位符。
 
+如：`#{item,jdbcType=BIGINT} -> #{__frch_item_0,jdbcType=BIGINT}`
 
+==注，用来解析占位符的解析器：==`org.apache.ibatis.parsing.GenericTokenParser`
+
+```java
+private static class FilteredDynamicContext extends DynamicContext {
+    private final DynamicContext delegate;
+    private final int index;
+    private final String itemIndex;
+    private final String item;
+
+    public FilteredDynamicContext(Configuration configuration,DynamicContext delegate, String itemIndex, String item, int i) {
+        super(configuration, null);
+        this.delegate = delegate;
+        this.index = i;
+        this.itemIndex = itemIndex;
+        this.item = item;
+    }
+
+    @Override
+    public Map<String, Object> getBindings() {
+        return delegate.getBindings();
+    }
+
+    @Override
+    public void bind(String name, Object value) {
+        delegate.bind(name, value);
+    }
+
+    @Override
+    public String getSql() {
+        return delegate.getSql();
+    }
+
+    @Override
+    public void appendSql(String sql) {
+        GenericTokenParser parser = new GenericTokenParser("#{", "}", content -> {
+            String newContent = content.replaceFirst("^\\s*" + item + "(?![^.,:\\s])", itemizeItem(item, index));
+            if (itemIndex != null && newContent.equals(content)) {
+                newContent = content.replaceFirst("^\\s*" + itemIndex + "(?![^.,:\\s])", itemizeItem(itemIndex, index));
+            }
+            return "#{" + newContent + "}";
+        });
+
+        delegate.appendSql(parser.parse(sql));
+    }
+
+    @Override
+    public int getUniqueNumber() {
+        return delegate.getUniqueNumber();
+    }
+
+}
+```
 
 
 

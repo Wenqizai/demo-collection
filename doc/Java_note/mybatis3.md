@@ -2804,13 +2804,13 @@ SqlSource sqlSource = langDriver.createSqlSource(configuration, context, paramet
 public class DynamicContext {
 	// 绑定实参的key
     public static final String PARAMETER_OBJECT_KEY = "_parameter";
-    public static final String DATABASE_ID_KEY = "_databaseId";
+    public static final String DATABASE_ID_KEY = "_databaseIdd
 
     static {
         OgnlRuntime.setPropertyAccessor(ContextMap.class, new ContextAccessor());
     }
 
-    // 保存实参绑定的信息, 因为 PreparedStatement 防止 SQL 注入问题, 故参数不可直接拼接, 需要暂时在这里
+    // 动态sql时， 保存实参绑定的信息, 因为 PreparedStatement 防止 SQL 注入问题, 故参数不可直接拼接, 需要暂时在这里
     // sql 调用时再 set 进入
     private final ContextMap bindings;
     // 用来拼接SQL
@@ -3435,6 +3435,20 @@ public class ChooseSqlNode implements SqlNode {
 
 SqlSource 负责组装解析后的每个 sqlNode，以如下动态 SQL ，返回的 DynamicSqlSource 为例，展示 SqlSource 的数据结构。 
 
+```java
+public interface SqlSource {
+
+  BoundSql getBoundSql(Object parameterObject);
+
+}
+```
+
+我们可以从这个方法中看到：`org.apache.ibatis.scripting.xmltags.XMLScriptBuilder#parseScriptNode`，MyBatis 根据标志字段 isDynamic 来创建不同的 SqlSource，分别是：DynamicSqlSource 和 RawSqlSource。
+
+![image-20230807154219242](material/MyBatis/SqlSource相关实现类.png)
+
+> SqlSource 数据结构
+
 ```xml
 <select id="selectByRole" resultType="wenqitest.Role">
   select * from role
@@ -3458,13 +3472,141 @@ SqlSource 负责组装解析后的每个 sqlNode，以如下动态 SQL ，返回
 
 ![image-20230730171052424](material/MyBatis/动态SQL调用栈.png)
 
+#### SqlSourceBuilder
+
+我们从 `RawSqlSource.getBoundSql` 和 `DynamicSqlSource.getBoundSql` 中可以看到都创建了 SqlSourceBuilder，并调用了 `parse()` 方法。
 
 
 
+> parse
 
+parse()：主要作用是，解析`#{id,jdbcType=BIGINT}`，并替换成`？`，并解析参数的类型。
 
+```java
+public SqlSource parse(String originalSql, Class<?> parameterType, Map<String, Object> additionalParameters) {
+    ParameterMappingTokenHandler handler = new ParameterMappingTokenHandler(configuration, parameterType, additionalParameters);
+    GenericTokenParser parser = new GenericTokenParser("#{", "}", handler);
+    String sql = parser.parse(originalSql);
+    return new StaticSqlSource(configuration, sql, handler.getParameterMappings());
+}
+```
 
+- 效果
 
+```sql
+select id, role_name as roleName, note from role where id = #{id,jdbcType=BIGINT}
+
+--> 
+
+select id, role_name as roleName, note from role where id = ?
+```
+
+> ParameterMappingTokenHandler
+
+org.apache.ibatis.builder.SqlSourceBuilder.ParameterMappingTokenHandler：参数类型解析处理器，如`jdbcType=BIGINT`解析类名`java.lang.Long`，并存放在`parameterMappings`中。
+
+#### DynamicSqlSource
+
+DynamicSqlSource：用来处理动态 SQL 的组装，当执行阶段调用 `getBoundSql()` 时，先创建 DynamicContext 并调用 `rootSqlNode.apply(context)` 来完成 sqlNode 的拼接和实体参数的绑定。
+
+最终也是委托 `StaticSqlSource.getBoundSql()` 来构建 BoundSql 来返回。
+
+```java
+public class DynamicSqlSource implements SqlSource {
+
+    private final Configuration configuration;
+    private final SqlNode rootSqlNode;
+
+    public DynamicSqlSource(Configuration configuration, SqlNode rootSqlNode) {
+        this.configuration = configuration;
+        this.rootSqlNode = rootSqlNode;
+    }
+
+    // parameterObject y
+    @Override
+    public BoundSql getBoundSql(Object parameterObject) {
+        // sqlNode 的组装，rootSqlNode 实际上是 mixedSqlNode
+        DynamicContext context = new DynamicContext(configuration, parameterObject);
+        rootSqlNode.apply(context);
+        // 使用 SqlSourceBuilder 来解析替换占位符 #{}，并构建 StaticSqlSource
+        SqlSourceBuilder sqlSourceParser = new SqlSourceBuilder(configuration);
+        Class<?> parameterType = parameterObject == null ? Object.class : parameterObject.getClass();
+        SqlSource sqlSource = sqlSourceParser.parse(context.getSql(), parameterType, context.getBindings());
+        // 获取 BoundSql
+        BoundSql boundSql = sqlSource.getBoundSql(parameterObject);
+        context.getBindings().forEach(boundSql::setAdditionalParameter);
+        return boundSql;
+    }
+
+}
+```
+
+#### RawSqlSource
+
+RawSqlSource：用来处理非动态 sql 的组装，当执行阶段调用 `getBoundSql()` 时，可以看到实际上是委托 `StaticSqlSource.getBoundSql()` 来处理。
+
+构造器里面：`sqlSource = sqlSourceParser.parse(sql, clazz, new HashMap<>());`，完成了 sql 的组装和占位符的替换。
+
+```java
+public class RawSqlSource implements SqlSource {
+
+    private final SqlSource sqlSource;
+
+    public RawSqlSource(Configuration configuration, SqlNode rootSqlNode, Class<?> parameterType) {
+        this(configuration, getSql(configuration, rootSqlNode), parameterType);
+    }
+
+    public RawSqlSource(Configuration configuration, String sql, Class<?> parameterType) {
+        SqlSourceBuilder sqlSourceParser = new SqlSourceBuilder(configuration);
+        Class<?> clazz = parameterType == null ? Object.class : parameterType;
+        // 非动态 sql， 无 DynamicContext 绑定实参，故传入 new HashMap<>() 
+        sqlSource = sqlSourceParser.parse(sql, clazz, new HashMap<>());
+    }
+
+    // 构造阶段，完成 sqlNode 的拼接
+    private static String getSql(Configuration configuration, SqlNode rootSqlNode) {
+        DynamicContext context = new DynamicContext(configuration, null);
+        rootSqlNode.apply(context);
+        return context.getSql();
+    }
+
+    @Override
+    public BoundSql getBoundSql(Object parameterObject) {
+        return sqlSource.getBoundSql(parameterObject);
+    }
+
+}
+```
+
+#### StaticSqlSource
+
+StaticSqlSource：保存用来构造 sql 的所需信息，包括 sql 语句, 参数类型。当调用 `getBoundSql(`) 方法时，构造 BoundSql 返回。
+
+```java
+public class StaticSqlSource implements SqlSource {
+	// 待 ？的 sql 语句
+    private final String sql;
+    // 传入的参数类型
+    private final List<ParameterMapping> parameterMappings;
+    private final Configuration configuration;
+
+    public StaticSqlSource(Configuration configuration, String sql) {
+        this(configuration, sql, null);
+    }
+
+    public StaticSqlSource(Configuration configuration, String sql, List<ParameterMapping> parameterMappings) {
+        this.sql = sql;
+        this.parameterMappings = parameterMappings;
+        this.configuration = configuration;
+    }
+
+    @Override
+    public BoundSql getBoundSql(Object parameterObject) {
+        return new BoundSql(configuration, sql, parameterMappings, parameterObject);
+    }
+
+}
+```
 
 
 

@@ -32,7 +32,7 @@ public class BakeryController {
 
     private ExecutorService bakers = new ThreadPoolExecutor(5, 200, 0L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<Runnable>(1024), Executors.defaultThreadFactory(), new ThreadPoolExecutor.AbortPolicy());
 
-    @Autowired
+    //@Autowired
     private ServletWebServerApplicationContext applicationContext;
 
     @GetMapping("/bake/{bakeGood}")

@@ -11,7 +11,7 @@ import org.springframework.context.annotation.ComponentScan;
  * @date 2021/9/18
  */
 @ServletComponentScan
-@SpringBootApplication(exclude = DataSourceAutoConfiguration.class)
+@SpringBootApplication
 public class Application {
     public static void main(String[] args) {
         SpringApplication.run(Application.class, args);

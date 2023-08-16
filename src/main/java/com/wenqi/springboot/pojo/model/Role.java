@@ -1,4 +1,4 @@
-package com.wenqi.springboot.dto;
+package com.wenqi.springboot.pojo.model;
 
 /**
  * @author liangwenqi

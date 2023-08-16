@@ -1,4 +1,4 @@
-package com.wenqi.springboot.request.longpolling.demo02;
+package com.wenqi.springboot.center.request.longpolling.demo02;
 
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Multimap;

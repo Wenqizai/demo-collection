@@ -1,4 +1,4 @@
-package com.wenqi.springboot.filter.gzip;
+package com.wenqi.springboot.center.gzip;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

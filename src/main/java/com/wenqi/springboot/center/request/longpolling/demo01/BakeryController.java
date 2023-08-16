@@ -1,4 +1,4 @@
-package com.wenqi.springboot.request.longpolling.demo01;
+package com.wenqi.springboot.center.request.longpolling.demo01;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;

@@ -1,4 +1,4 @@
-package com.wenqi.springboot.filter.gzip;
+package com.wenqi.springboot.center.gzip;
 
 import javax.servlet.ServletException;
 

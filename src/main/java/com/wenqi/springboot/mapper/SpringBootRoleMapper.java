@@ -1,6 +1,6 @@
 package com.wenqi.springboot.mapper;
 
-import com.wenqi.springboot.dto.Role;
+import com.wenqi.springboot.pojo.model.Role;
 import com.wenqi.test.mybatis.RoleConditionDto;
 import org.apache.ibatis.annotations.Param;
 

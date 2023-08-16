@@ -3,7 +3,7 @@
         PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.wenqi.springboot.mapper.SpringBootRoleMapper">
-    <resultMap type="com.wenqi.springboot.dto.Role" id="roleMap">
+    <resultMap type="com.wenqi.springboot.pojo.model.Role" id="roleMap">
         <id column="id" property="id" javaType="long" jdbcType="BIGINT"/>
         <result column="role_name" property="roleName" javaType="string" jdbcType="VARCHAR"/>
         <result column="note" property="note" javaType="string" jdbcType="VARCHAR"/>
@@ -23,7 +23,7 @@
                                     '%')
     </select>
 
-    <insert id="insertRole" parameterType="com.wenqi.springboot.dto.Role">
+    <insert id="insertRole" parameterType="com.wenqi.springboot.pojo.model.Role">
         <selectKey keyProperty="id" order="AFTER" resultType="java.lang.Long">
             SELECT LAST_INSERT_ID()
         </selectKey>
@@ -40,7 +40,7 @@
         and role_name = ''
     </sql>
 
-    <select id="selectRoleById" resultType="com.wenqi.springboot.dto.Role">
+    <select id="selectRoleById" resultType="com.wenqi.springboot.pojo.model.Role">
         select *
         from role where id in
         <foreach collection="list" open="(" close=")" separator="," item="item">
@@ -48,7 +48,7 @@
         </foreach>
     </select>
 
-    <select id="selectByRole" resultType="com.wenqi.springboot.dto.Role">
+    <select id="selectByRole" resultType="com.wenqi.springboot.pojo.model.Role">
         select *
         from role
         <where>
@@ -84,7 +84,7 @@
         </foreach>
     </insert>
 
-    <select id="selectByIds" resultType="com.wenqi.springboot.dto.Role">
+    <select id="selectByIds" resultType="com.wenqi.springboot.pojo.model.Role">
         select *
         from role where id in
         <foreach collection="idsList" item="item" separator="," open="(" close=")">
@@ -92,7 +92,7 @@
         </foreach>
     </select>
 
-    <select id="selectByCondition" resultType="com.wenqi.springboot.dto.Role">
+    <select id="selectByCondition" resultType="com.wenqi.springboot.pojo.model.Role">
         select *
         from role
         <where>

@@ -1,4 +1,4 @@
-package com.wenqi.springboot.request.longpolling.demo03;
+package com.wenqi.springboot.center.request.longpolling.demo03;
 
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -7,8 +7,6 @@ import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClientBuilder;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;

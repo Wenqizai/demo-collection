@@ -22,7 +22,7 @@ public class ThreadController {
 
     @GetMapping("/multiThreadInsert")
     public String multiThreadInsert(@RequestParam("id") String id) {
-        multiThreadTransaction.multiThreadInsert(id);
+        multiThreadTransaction.multiThreadInsertInLimit(id);
         return "success";
     }
 }

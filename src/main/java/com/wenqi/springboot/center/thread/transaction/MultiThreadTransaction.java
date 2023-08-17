@@ -27,7 +27,7 @@ import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
-import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -43,7 +43,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @Slf4j
 @Service
 public class MultiThreadTransaction {
-    private final ThreadPoolExecutor executor = new ThreadPoolExecutor(10, 10, 10, TimeUnit.SECONDS, new LinkedBlockingQueue<>(100), Executors.defaultThreadFactory(), new ThreadPoolExecutor.CallerRunsPolicy());
+    private final ThreadPoolExecutor executor = new ThreadPoolExecutor(2, 20, 10, TimeUnit.SECONDS, new SynchronousQueue<>(), Executors.defaultThreadFactory(), new ThreadPoolExecutor.CallerRunsPolicy());
 
     @Autowired
     private SpringBootRoleMapper springBootRoleMapper;
@@ -123,6 +123,10 @@ public class MultiThreadTransaction {
      * 线程池核心线程是2个, 最终能控制事务的只有2个, 其他任务被阻塞了导致最后被回滚了事务
      * <p>
      * 除非: 核心线程数要等于 threadLatches 的个数, 否则方案行不通
+     * <p>
+     * 解决:
+     *      1. 适当提高最大线程数, maximumPoolSize 远大于 threadLatches , 考虑并发请求情况
+     *      2. 阻塞队列使用: SynchronousQueue, 不存储元素
      */
     @Transactional(propagation = Propagation.REQUIRED, rollbackFor = {Exception.class})
     public void multiThreadInsertInLimit(String id) {
@@ -153,17 +157,17 @@ public class MultiThreadTransaction {
     }
 
     public void doInChildThread(int i, AtomicBoolean hasException, Role role, CountDownLatch threadLatches, CountDownLatch mainLatch) {
-        TransactionStatus transactionStatus = dataSourceTransactionManager.getTransaction(transactionDefinition);
         if (hasException.get()) {
             return;
         }
+        TransactionStatus transactionStatus = dataSourceTransactionManager.getTransaction(transactionDefinition);
         try {
             log.info("开始事务: " + i);
 
             springBootRoleMapper.insertRole(role);
-            //if (i == 4) {
-            //    throw new RuntimeException(i + " -> 发生了异常");
-            //}
+            if (i == 4) {
+                throw new RuntimeException(i + " -> 发生了异常");
+            }
 
             log.info("结束事务: " + i);
         } catch (Exception e) {

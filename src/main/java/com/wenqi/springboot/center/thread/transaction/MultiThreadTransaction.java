@@ -26,7 +26,9 @@ import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -36,6 +38,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * 多线程事务控制
  * <p>
  * 可以行得通的方案: multiThreadInsertInLimit (严重依赖核心线程数)
+ * multiThreadInsertInLimit 更为优雅的实现方式, multiThreadInsertGraceful, 但也是无法解决严重依赖核心线程数的困局
  *
  * @author liangwenqi
  * @date 2023/8/16
@@ -44,6 +47,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @Service
 public class MultiThreadTransaction {
     private final ThreadPoolExecutor executor = new ThreadPoolExecutor(2, 20, 10, TimeUnit.SECONDS, new SynchronousQueue<>(), Executors.defaultThreadFactory(), new ThreadPoolExecutor.CallerRunsPolicy());
+    private final ExecutorService executor2 = Executors.newFixedThreadPool(2);
+    private final ThreadPoolExecutor executor3 = new ThreadPoolExecutor(2, 5, 20, TimeUnit.SECONDS, new SynchronousQueue<>(), Executors.defaultThreadFactory(), new ThreadPoolExecutor.CallerRunsPolicy());
 
     @Autowired
     private SpringBootRoleMapper springBootRoleMapper;
@@ -59,6 +64,71 @@ public class MultiThreadTransaction {
     private PlatformTransactionManager transactionManager;
 
     public void multiThreadInsert(String id) {
+
+    }
+
+    public void multiThreadInsertGraceful(String id) {
+        List<Role> roleList = buildRoleList(id);
+        AtomicBoolean hasException = new AtomicBoolean(false);
+        CountDownLatch threadLatches = new CountDownLatch(roleList.size());
+
+        List<CompletableFuture<Void>>  futureList = new ArrayList<>(roleList.size());
+        for (int i = 0; i < roleList.size(); i++) {
+            int finalI = i;
+            CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
+                doInChildThread2(finalI, hasException, roleList.get(finalI), threadLatches);
+
+            }, executor3);
+            futureList.add(future);
+        }
+
+        CompletableFuture.allOf(futureList.toArray(new CompletableFuture[0])).join();
+
+        if (hasException.get()) {
+            throw new RuntimeException("发生了异常");
+        }
+
+        log.info("main end");
+    }
+
+    public void doInChildThread2(int i, AtomicBoolean hasException, Role role, CountDownLatch threadLatches) {
+        if (hasException.get()) {
+            return;
+        }
+        TransactionStatus transactionStatus = dataSourceTransactionManager.getTransaction(transactionDefinition);
+        try {
+            log.info("开始事务: " + i);
+
+            springBootRoleMapper.insertRole(role);
+//            if (i == 4) {
+//                throw new RuntimeException(i + " -> 发生了异常");
+//            }
+
+            log.info("结束事务: " + i);
+        } catch (Exception e) {
+            log.error("发生了异常: ", e);
+            hasException.set(true);
+        } finally {
+            threadLatches.countDown();
+        }
+
+        try {
+            // 倒计时锁设置超时时间 30s
+            boolean await = threadLatches.await(30, TimeUnit.SECONDS);
+            if (!await) { // 等待超时，事务回滚
+                hasException.set(true);
+            }
+        } catch (Throwable e) {
+            log.error("threadLatch wait exception", e);
+            hasException.set(true);
+        }
+
+        // 判断是否有错误，如有错误 就回滚事务
+        if (hasException.get()) {
+            dataSourceTransactionManager.rollback(transactionStatus);
+        } else {
+            dataSourceTransactionManager.commit(transactionStatus);
+        }
     }
 
     /**

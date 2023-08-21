@@ -37,8 +37,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * 多线程事务控制
  * <p>
- * 可以行得通的方案: multiThreadInsertInLimit (严重依赖核心线程数)
- * multiThreadInsertInLimit 更为优雅的实现方式, multiThreadInsertGraceful, 但也是无法解决严重依赖核心线程数的困局
+ * 可以行得通的方案: multiThreadInsertInLimit (严重依赖线程数)
+ * multiThreadInsertInLimit 更为优雅的实现方式, multiThreadInsertGraceful, 但也是无法解决严重依赖线程数的困局
+ * plus: 当 线程池的拒绝策略是 CallerRunsPolicy 时, 所需至少线程数 = 任务数 - 1;
  *
  * @author liangwenqi
  * @date 2023/8/16
@@ -48,7 +49,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class MultiThreadTransaction {
     private final ThreadPoolExecutor executor = new ThreadPoolExecutor(2, 20, 10, TimeUnit.SECONDS, new SynchronousQueue<>(), Executors.defaultThreadFactory(), new ThreadPoolExecutor.CallerRunsPolicy());
     private final ExecutorService executor2 = Executors.newFixedThreadPool(2);
-    private final ThreadPoolExecutor executor3 = new ThreadPoolExecutor(2, 5, 20, TimeUnit.SECONDS, new SynchronousQueue<>(), Executors.defaultThreadFactory(), new ThreadPoolExecutor.CallerRunsPolicy());
+    private final ThreadPoolExecutor executor3 = new ThreadPoolExecutor(2, 9, 20, TimeUnit.SECONDS, new SynchronousQueue<>(), Executors.defaultThreadFactory(), new ThreadPoolExecutor.CallerRunsPolicy());
 
     @Autowired
     private SpringBootRoleMapper springBootRoleMapper;
@@ -100,9 +101,9 @@ public class MultiThreadTransaction {
             log.info("开始事务: " + i);
 
             springBootRoleMapper.insertRole(role);
-//            if (i == 4) {
-//                throw new RuntimeException(i + " -> 发生了异常");
-//            }
+            if (i == 4) {
+                throw new RuntimeException(i + " -> 发生了异常");
+            }
 
             log.info("结束事务: " + i);
         } catch (Exception e) {

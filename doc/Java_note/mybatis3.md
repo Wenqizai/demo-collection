@@ -3710,6 +3710,12 @@ public List<Object> handleResultSets(Statement stmt) throws SQLException {
 }
 ```
 
+- ResultSetWrapper 
+
+
+
+ResultSet 的包装类，里面包含所有的映射信息和元数据信息，如 resultSet、columnNames、classNames、jdbcTypes、typeHandler 等等。
+
 > handleResultSet
 
 解析单个 ResultSet：由 sql 标签中定义的 ResultMap 中定义的映射规则来处理ResultSet，并解析成 Java 对象加入 multipleResults 中返回。
@@ -3815,25 +3821,174 @@ private Object getRowValue(ResultSetWrapper rsw, ResultMap resultMap, String col
 }
 ```
 
+### ResultHandler
 
+当解析完 ResultSet 时，返回的 Java 对象就会保存在 ResultContext，传输到 ResultHandler 做最后结果集的处理。
 
+ResultHandler 实现类如下：
 
+- DefaultResultHandler ：selectOne、selectList
+- DefaultMapResultHandler : selectMap
+- ObjectWrapperResultHandler ：Cursor select
 
+```java
+public interface ResultHandler<T> {
+    void handleResult(ResultContext<? extends T> resultContext);
+}
+```
 
+![image-20230828100015571](material/MyBatis/ResultHandler相关类.png)
 
+#### ResultContext
 
+见文知义，ResultContext 是用来携带 result 的上下文。只有一个默认实现：`org.apache.ibatis.executor.result.DefaultResultContext`。
 
+```java
+public interface ResultContext<T> {
 
+    T getResultObject();
 
+    int getResultCount();
 
+    boolean isStopped();
 
+    void stop();
 
+}
 
+public class DefaultResultContext<T> implements ResultContext<T> {
+	// 解析出来的 Java 对象
+    private T resultObject;
+    // 已经解析出来的 Java 对象数量
+    private int resultCount;
+    private boolean stopped;
 
+    public DefaultResultContext() {
+        resultObject = null;
+        resultCount = 0;
+        stopped = false;
+    }
 
+    @Override
+    public T getResultObject() {
+        return resultObject;
+    }
 
+    @Override
+    public int getResultCount() {
+        return resultCount;
+    }
 
+    @Override
+    public boolean isStopped() {
+        return stopped;
+    }
 
+    public void nextResultObject(T resultObject) {
+        resultCount++;
+        this.resultObject = resultObject;
+    }
+
+    @Override
+    public void stop() {
+        this.stopped = true;
+    }
+
+}
+```
+
+#### DefaultResultHandler
+
+DefaultResultHandler 用来解析 selectOne 和 selectList 等查询结果。由 `handleResult()` 方法可以看出，DefaultResultHandler 内部维护一个 list，每解析一个 resultSet 对应的 Java 对象就 add 到这个 list 中。
+
+```java
+public class DefaultResultHandler implements ResultHandler<Object> {
+
+    private final List<Object> list;
+
+    public DefaultResultHandler() {
+        list = new ArrayList<>();
+    }
+
+    @SuppressWarnings("unchecked")
+    public DefaultResultHandler(ObjectFactory objectFactory) {
+        list = objectFactory.create(List.class);
+    }
+
+    @Override
+    public void handleResult(ResultContext<?> context) {
+        list.add(context.getResultObject());
+    }
+
+    public List<Object> getResultList() {
+        return list;
+    }
+
+}
+```
+
+#### DefaultMapResultHandler
+
+见文知义，用来处理返回值是 Map 的查询方法。由 `handleResult()` 可知，跟进传入的 mapKey 来构造一个 Map 返回。
+
+**==注意：==** selectMap 方法都是先调用 selectList 之后，根据返回的 list 来构造返回值 Map，而不是一开始就构造 Map 来返回。具体可看下述 `selectMap()` 方法。
+
+- 关于 selectMap() 使用的正确姿势：
+
+https://stackoverflow.com/questions/11913013/return-hashmap-in-mybatis-and-use-it-as-modelattribute-in-spring-mvc
+
+```java
+public class DefaultMapResultHandler<K, V> implements ResultHandler<V> {
+
+    private final Map<K, V> mappedResults;
+    private final String mapKey;
+    private final ObjectFactory objectFactory;
+    private final ObjectWrapperFactory objectWrapperFactory;
+    private final ReflectorFactory reflectorFactory;
+
+    @SuppressWarnings("unchecked")
+    public DefaultMapResultHandler(String mapKey, ObjectFactory objectFactory, ObjectWrapperFactory objectWrapperFactory, ReflectorFactory reflectorFactory) {
+        this.objectFactory = objectFactory;
+        this.objectWrapperFactory = objectWrapperFactory;
+        this.reflectorFactory = reflectorFactory;
+        this.mappedResults = objectFactory.create(Map.class);
+        this.mapKey = mapKey;
+    }
+
+    @Override
+    public void handleResult(ResultContext<? extends V> context) {
+        final V value = context.getResultObject();
+        final MetaObject mo = MetaObject.forObject(value, objectFactory, objectWrapperFactory, reflectorFactory);
+        // TODO is that assignment always true?
+        final K key = (K) mo.getValue(mapKey);
+        mappedResults.put(key, value);
+    }
+
+    public Map<K, V> getMappedResults() {
+        return mappedResults;
+    }
+}
+```
+
+- selectMap
+
+`org.apache.ibatis.session.defaults.DefaultSqlSession#selectMap(java.lang.String, java.lang.Object, java.lang.String, org.apache.ibatis.session.RowBounds)`
+
+```java
+public <K, V> Map<K, V> selectMap(String statement, Object parameter, String mapKey, RowBounds rowBounds) {
+	// 先查询 selectList，完成映射之后返回的 list
+    final List<? extends V> list = selectList(statement, parameter, rowBounds);
+    final DefaultMapResultHandler<K, V> mapResultHandler = new DefaultMapResultHandler<>(mapKey, configuration.getObjectFactory(), configuration.getObjectWrapperFactory(), configuration.getReflectorFactory());
+    final DefaultResultContext<V> context = new DefaultResultContext<>();
+    // 循环处理成 Map
+    for (V o : list) {
+        context.nextResultObject(o);
+        mapResultHandler.handleResult(context);
+    }
+    // 返回
+    return mapResultHandler.getMappedResults();
+}
+```
 
 
 

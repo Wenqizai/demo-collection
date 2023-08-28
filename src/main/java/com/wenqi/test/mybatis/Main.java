@@ -13,6 +13,7 @@ import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 
 /**
  * @author liangwenqi
@@ -42,8 +43,10 @@ public class Main {
 //      test01(sqlSession);
 //      testInsert(sqlSession);
 //      testDtoSelect(sqlSession);
-      testCondition(sqlSession);
+//      testCondition(sqlSession);
+      executeForMap(sqlSession);
 
+      
       sqlSession.commit();
 
     } catch (Exception e) {
@@ -105,4 +108,11 @@ public class Main {
     Role role = roleMapper.getRole(1L);
     System.out.println(role.getId() + ":" + role.getRoleName() + ":" + role.getNote());
   }
+
+  private static void executeForMap(SqlSession sqlSession) {
+    RoleMapper roleMapper = sqlSession.getMapper(RoleMapper.class);
+    Map<Long, Role> stringRoleMap = roleMapper.selectMapByIds(Arrays.asList(1L, 2L, 3L));
+    System.out.println(stringRoleMap);
+  }
+
 }

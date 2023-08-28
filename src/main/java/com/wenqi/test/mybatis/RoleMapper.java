@@ -1,8 +1,10 @@
 package com.wenqi.test.mybatis;
 
+import org.apache.ibatis.annotations.MapKey;
 import org.apache.ibatis.annotations.Param;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * @author liangwenqi
@@ -29,4 +31,7 @@ public interface RoleMapper {
     List<Role> selectByIds(@Param("idsList") List<Long> idsList);
 
     List<Role> selectByCondition(RoleConditionDto roleConditionDto);
+
+    @MapKey("id")
+    Map<Long, Role> selectMapByIds(List<Long> list);
 }

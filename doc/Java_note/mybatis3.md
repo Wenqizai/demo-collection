@@ -3990,6 +3990,250 @@ public <K, V> Map<K, V> selectMap(String statement, Object parameter, String map
 }
 ```
 
+## StatementHandler
+
+StatementHandler，MyBatis 非常重要的接口，接口定义了一系列的操作，如创建查询Statement，参数绑定，SQL 执行等程序入口。
+
+- 相关实现类
+
+![image-20230828144015219](material/MyBatis/StatementHandler相关实现类.png)
+
+- 定义方法
+
+```java
+public interface StatementHandler {
+	// 创建 Statement
+    Statement prepare(Connection connection, Integer transactionTimeout) throws SQLException;
+	// SQL 语句绑定实体参数
+    void parameterize(Statement statement) throws SQLException;
+	// 批量执行 SQL
+    void batch(Statement statement) throws SQLException;
+	// 单条执行update SQL
+    int update(Statement statement) throws SQLException;
+	// 单条执行query SQL
+    <E> List<E> query(Statement statement, ResultHandler resultHandler) throws SQLException;
+	// 单条执行cursor SQL
+    <E> Cursor<E> queryCursor(Statement statement) throws SQLException;
+	// 获取绑定 SQL, 此时为绑定实参，只有占位符
+    BoundSql getBoundSql();
+	// 获取参数处理器 ParameterHandler
+    ParameterHandler getParameterHandler();
+
+}
+```
+
+### RoutingStatementHandler
+
+RoutingStatementHandler，在构造器中根据不同查询类型来构造不同 StatementHandler 作为委托对象，其余的实现方法均由委托的StatementHandler 来执行。
+
+```java
+public class RoutingStatementHandler implements StatementHandler {
+
+    private final StatementHandler delegate;
+
+    public RoutingStatementHandler(Executor executor, MappedStatement ms, Object parameter, RowBounds rowBounds, ResultHandler resultHandler, BoundSql boundSql) {
+
+        switch (ms.getStatementType()) {
+            case STATEMENT:
+                delegate = new SimpleStatementHandler(executor, ms, parameter, rowBounds, resultHandler, boundSql);
+                break;
+            case PREPARED:
+                delegate = new PreparedStatementHandler(executor, ms, parameter, rowBounds, resultHandler, boundSql);
+                break;
+            case CALLABLE:
+                delegate = new CallableStatementHandler(executor, ms, parameter, rowBounds, resultHandler, boundSql);
+                break;
+            default:
+                throw new ExecutorException("Unknown statement type: " + ms.getStatementType());
+        }
+
+    }
+}
+```
+
+- 关于 STATEMENT 的类型
+
+| 类型      | 用法                                        |
+| --------- | ------------------------------------------- |
+| STATEMENT | 对应于Statement对象，有SQL注入的风险        |
+| PREPARED  | PreparedStatement，预编译处理               |
+| CALLABLE  | CallableStatement一般调用存储过程的时候使用 |
+
+### BaseStatementHandler
+
+BaseStatementHandler 作为抽象类，仅实现了 `StatementHandler.prepare()` 方法，主要为新建的 Statement 对象设置一些参数，如 timeout、fetchSize等。
+
+```java
+public abstract class BaseStatementHandler implements StatementHandler {
+
+    protected final Configuration configuration;
+    protected final ObjectFactory objectFactory;
+    protected final TypeHandlerRegistry typeHandlerRegistry;
+    protected final ResultSetHandler resultSetHandler;
+    protected final ParameterHandler parameterHandler;
+
+    protected final Executor executor;
+    protected final MappedStatement mappedStatement;
+    protected final RowBounds rowBounds;
+
+    protected BoundSql boundSql;
+
+    protected BaseStatementHandler(Executor executor, MappedStatement mappedStatement, Object parameterObject, RowBounds rowBounds, ResultHandler resultHandler, BoundSql boundSql) {
+        this.configuration = mappedStatement.getConfiguration();
+        this.executor = executor;
+        this.mappedStatement = mappedStatement;
+        this.rowBounds = rowBounds;
+
+        this.typeHandlerRegistry = configuration.getTypeHandlerRegistry();
+        this.objectFactory = configuration.getObjectFactory();
+
+        if (boundSql == null) { // issue #435, get the key before calculating the statement
+            generateKeys(parameterObject);
+            boundSql = mappedStatement.getBoundSql(parameterObject);
+        }
+
+        this.boundSql = boundSql;
+
+        this.parameterHandler = configuration.newParameterHandler(mappedStatement, parameterObject, boundSql);
+        this.resultSetHandler = configuration.newResultSetHandler(executor, mappedStatement, rowBounds, parameterHandler, resultHandler, boundSql);
+    }
+
+    @Override
+    public Statement prepare(Connection connection, Integer transactionTimeout) throws SQLException {
+        ErrorContext.instance().sql(boundSql.getSql());
+        Statement statement = null;
+        try {
+            // Statement 的初始化
+            statement = instantiateStatement(connection);
+            // 参数设置
+            setStatementTimeout(statement, transactionTimeout);
+            setFetchSize(statement);
+            return statement;
+        } catch (SQLException e) {
+            closeStatement(statement);
+            throw e;
+        } catch (Exception e) {
+            closeStatement(statement);
+            throw new ExecutorException("Error preparing statement.  Cause: " + e, e);
+        }
+    }
+}
+```
+
+#### KeyGenerator
+
+BaseStatementHandler 在构造过程中调用 `generateKeys(parameterObject)` 方法，KeyGenerator 接口来生成主键。
+
+- generateKeys()
+
+可以看到调用了 `keyGenerator.processBefore(executor, mappedStatement, null, parameter);` 方法。
+
+```java
+protected void generateKeys(Object parameter) {
+  KeyGenerator keyGenerator = mappedStatement.getKeyGenerator();
+  ErrorContext.instance().store();
+  keyGenerator.processBefore(executor, mappedStatement, null, parameter);
+  ErrorContext.instance().recall();
+}
+```
+
+- 相关类
+
+![image-20230828152115092](material/MyBatis/KeyGenerator相关实现类.png)
+
+- 接口定义
+
+ NoKeyGenerator、Jdbc3KeyGenerator.processBefore 都是空实现。
+
+```java
+public interface KeyGenerator {
+
+    void processBefore(Executor executor, MappedStatement ms, Statement stmt, Object parameter);
+
+    void processAfter(Executor executor, MappedStatement ms, Statement stmt, Object parameter);
+
+}
+```
+
+> SelectKeyGenerator
+
+ SelectKeyGenerator 中的 processBefore 和 processAfter 是互斥的，只会执行一个。
+
+```java
+public class SelectKeyGenerator implements KeyGenerator {
+
+    @Override
+    public void processBefore(Executor executor, MappedStatement ms, Statement stmt, Object parameter) {
+        if (executeBefore) {
+            processGeneratedKeys(executor, ms, parameter);
+        }
+    }
+
+    @Override
+    public void processAfter(Executor executor, MappedStatement ms, Statement stmt, Object parameter) {
+        if (!executeBefore) {
+            processGeneratedKeys(executor, ms, parameter);
+        }
+    }
+
+    /**
+      * 
+      * @param executor  传入的执行器
+      * @param ms		保存配置和映射信息
+      * @param parameter 传入的实体参数
+      */
+    private void processGeneratedKeys(Executor executor, MappedStatement ms, Object parameter) {
+        try {
+            if (parameter != null && keyStatement != null && keyStatement.getKeyProperties() != null) {
+                // 定义的 keyProperty 标签属性
+                String[] keyProperties = keyStatement.getKeyProperties();
+                final Configuration configuration = ms.getConfiguration();
+                // 创建实体参数的对象，用来设置属性
+                final MetaObject metaParam = configuration.newMetaObject(parameter);
+                
+                // 这里 new 一个执行器，难道 executor 跟事务还是 session 有关？
+                // Do not close keyExecutor.
+                // The transaction will be closed by parent executor.
+                Executor keyExecutor = configuration.newExecutor(executor.getTransaction(), ExecutorType.SIMPLE);
+                List<Object> values = keyExecutor.query(keyStatement, parameter, RowBounds.DEFAULT, Executor.NO_RESULT_HANDLER);
+                
+                if (values.size() == 0) {
+                    throw new ExecutorException("SelectKey returned no data.");
+                } else if (values.size() > 1) {
+                    throw new ExecutorException("SelectKey returned more than one value.");
+                } else {
+                    // s
+                    MetaObject metaResult = configuration.newMetaObject(values.get(0));
+                    if (keyProperties.length == 1) {
+                        if (metaResult.hasGetter(keyProperties[0])) {
+                            setValue(metaParam, keyProperties[0], metaResult.getValue(keyProperties[0]));
+                        } else {
+                            // no getter for the property - maybe just a single value object
+                            // so try that
+                            setValue(metaParam, keyProperties[0], values.get(0));
+                        }
+                    } else {
+                        handleMultipleProperties(keyProperties, metaParam, metaResult);
+                    }
+                }
+            }
+        } catch (ExecutorException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new ExecutorException("Error selecting key or setting result to parameter object. Cause: " + e, e);
+        }
+    }
+}
+```
+
+
+
+
+
+
+
+
+
 
 
 

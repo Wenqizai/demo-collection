@@ -4317,19 +4317,140 @@ public class SelectKeyGenerator implements KeyGenerator {
 }
 ```
 
+#### ParameterHandler
 
+StatementHandler 提供获取参数处理器 ParameterHandler 的方法。ParameterHandler 用来处理 SQL 语句中占位符的绑定和设置，即 “？” 替换实体参数。 
 
+```java
+public interface ParameterHandler {
 
+  Object getParameterObject();
 
+  void setParameters(PreparedStatement ps)
+      throws SQLException;
 
+}
+```
 
+> DefaultParameterHandler
 
+DefaultParameterHandler 是 ParameterHandler 唯一实现。
 
+```java
+@Override
+public void setParameters(PreparedStatement ps) {
+    ErrorContext.instance().activity("setting parameters").object(mappedStatement.getParameterMap().getId());
+    // 参数绑定信息
+    List<ParameterMapping> parameterMappings = boundSql.getParameterMappings();
+    if (parameterMappings != null) {
+        for (int i = 0; i < parameterMappings.size(); i++) {
+            ParameterMapping parameterMapping = parameterMappings.get(i);
+            if (parameterMapping.getMode() != ParameterMode.OUT) {
+                Object value;
+                String propertyName = parameterMapping.getProperty();
+                // 获取参数值
+                if (boundSql.hasAdditionalParameter(propertyName)) { // issue #448 ask first for additional params
+                    value = boundSql.getAdditionalParameter(propertyName);
+                } else if (parameterObject == null) {
+                    value = null;
+                } else if (typeHandlerRegistry.hasTypeHandler(parameterObject.getClass())) {
+                    value = parameterObject;
+                } else {
+                    MetaObject metaObject = configuration.newMetaObject(parameterObject);
+                    value = metaObject.getValue(propertyName);
+                }
+                TypeHandler typeHandler = parameterMapping.getTypeHandler();
+                JdbcType jdbcType = parameterMapping.getJdbcType();
+                if (value == null && jdbcType == null) {
+                    jdbcType = configuration.getJdbcTypeForNull();
+                }
+                try {
+                    // 这里设置参数帮i的那个
+                    typeHandler.setParameter(ps, i + 1, value, jdbcType);
+                } catch (TypeException | SQLException e) {
+                    throw new TypeException("Could not set parameters for mapping: " + parameterMapping + ". Cause: " + e, e);
+                }
+            }
+        }
+    }
+}
+```
 
+### SimpleStatementHandler
 
+处理非 PreparedStatement 的请求。
 
+处理流程：statement -> excecute -> handleResult
 
+```java
+@Override
+public int update(Statement statement) throws SQLException {
+    String sql = boundSql.getSql();
+    Object parameterObject = boundSql.getParameterObject();
+    KeyGenerator keyGenerator = mappedStatement.getKeyGenerator();
+    int rows;
+    if (keyGenerator instanceof Jdbc3KeyGenerator) {
+        statement.execute(sql, Statement.RETURN_GENERATED_KEYS);
+        rows = statement.getUpdateCount();
+        keyGenerator.processAfter(executor, mappedStatement, statement, parameterObject);
+    } else if (keyGenerator instanceof SelectKeyGenerator) {
+        statement.execute(sql);
+        rows = statement.getUpdateCount();
+        keyGenerator.processAfter(executor, mappedStatement, statement, parameterObject);
+    } else {
+        statement.execute(sql);
+        rows = statement.getUpdateCount();
+    }
+    return rows;
+}
 
+@Override
+public void batch(Statement statement) throws SQLException {
+    String sql = boundSql.getSql();
+    statement.addBatch(sql);
+}
 
+@Override
+public <E> List<E> query(Statement statement, ResultHandler resultHandler) throws SQLException {
+    String sql = boundSql.getSql();
+    statement.execute(sql);
+    return resultSetHandler.handleResultSets(statement);
+}
+```
 
+### PreparedStatementHandler
+
+处理 PreparedStatement 的请求。
+
+处理流程：statement -> excecute -> keyGenerator.processAfter -> handleResult
+
+```java
+@Override
+public int update(Statement statement) throws SQLException {
+    PreparedStatement ps = (PreparedStatement) statement;
+    ps.execute();
+    int rows = ps.getUpdateCount();
+    Object parameterObject = boundSql.getParameterObject();
+    KeyGenerator keyGenerator = mappedStatement.getKeyGenerator();
+    keyGenerator.processAfter(executor, mappedStatement, ps, parameterObject);
+    return rows;
+}
+
+@Override
+public void batch(Statement statement) throws SQLException {
+    PreparedStatement ps = (PreparedStatement) statement;
+    ps.addBatch();
+}
+
+@Override
+public <E> List<E> query(Statement statement, ResultHandler resultHandler) throws SQLException {
+    PreparedStatement ps = (PreparedStatement) statement;
+    ps.execute();
+    return resultSetHandler.handleResultSets(ps);
+}
+```
+
+### CallableStatementHandler
+
+CallableStatementHandler 是处理存储过程的 StatementHandler 实现。
 

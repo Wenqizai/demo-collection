@@ -4124,6 +4124,8 @@ public abstract class BaseStatementHandler implements StatementHandler {
 
 BaseStatementHandler 在构造过程中调用 `generateKeys(parameterObject)` 方法，KeyGenerator 接口来生成主键。
 
+因为我们在执行 insert 语句中，可以不指定主键id，有些场景需要获取 insert 对象的对应的id，这时 KeyGenerator 可以很好帮助我们完成这项工作。
+
 - generateKeys()
 
 可以看到调用了 `keyGenerator.processBefore(executor, mappedStatement, null, parameter);` 方法。
@@ -4135,6 +4137,25 @@ protected void generateKeys(Object parameter) {
   keyGenerator.processBefore(executor, mappedStatement, null, parameter);
   ErrorContext.instance().recall();
 }
+```
+
+那么使用哪个 KeyGenerator 呢？初始化逻辑如下：
+
+1. 默认使用 NoKeyGenerator，
+2. 定义了 `<selectKey>` 标签，使用 SelectKeyGenerator，
+3. `<sql>` 标签指定了 `useGeneratedKey = true` 且是 insert 语句，使用 Jdbc3KeyGenerator。
+
+```java
+// 关于 KeyGenerator 解析顺序，后面的覆盖前面的形式
+
+// 1.1 org.apache.ibatis.builder.xml.XMLStatementBuilder#parseSelectKeyNode
+// 1.2 org.apache.ibatis.builder.annotation.MapperAnnotationBuilder#handleSelectKeyAnnotation
+
+// 2.1 org.apache.ibatis.builder.annotation.MapperAnnotationBuilder#parseStatement
+// 2.2 org.apache.ibatis.builder.xml.XMLStatementBuilder#parseStatementNode
+
+// 3. org.apache.ibatis.mapping.MappedStatement.Builder#Builder
+mappedStatement.keyGenerator = configuration.isUseGeneratedKeys() && SqlCommandType.INSERT.equals(sqlCommandType) ? Jdbc3KeyGenerator.INSTANCE : NoKeyGenerator.INSTANCE;
 ```
 
 - 相关类
@@ -4155,7 +4176,77 @@ public interface KeyGenerator {
 }
 ```
 
-> SelectKeyGenerator
+- 使用姿势
+
+```java
+// 1. SelectKeyGenerator
+<selectKey keyProperty="id" order="AFTER" resultType="java.lang.Long">
+    SELECT LAST_INSERT_ID()
+</selectKey>
+
+// 2. Jdbc3KeyGenerator
+<insert id="batchInsert" useGeneratedKeys="true">
+  insert into role (role_name, note)
+  values
+      <foreach collection="roleList" separator="," item="item">
+        (#{item.roleName,jdbcType=VARCHAR}, #{item.note,jdbcType=VARCHAR})
+      </foreach>
+</insert>
+```
+
+##### Jdbc3KeyGenerator
+
+Jdbc3KeyGenerator 用于取回数据库生成的自增id，并设置导传入的实体参数中。只实现了 processAfter，因为 id 是从 resultSet 中获取的。
+
+开启方法：
+
+	1. mybatis-config.xml \<setting> 中定义 useGeneratedKeys 全局配置
+	1. ＜insert＞ 标签中 useGeneratedKeys 属性。
+
+```java
+public class Jdbc3KeyGenerator implements KeyGenerator {
+
+    private static final String SECOND_GENERIC_PARAM_NAME = ParamNameResolver.GENERIC_NAME_PREFIX + "2";
+
+    public static final Jdbc3KeyGenerator INSTANCE = new Jdbc3KeyGenerator();
+
+    private static final String MSG_TOO_MANY_KEYS = "Too many keys are generated. There are only %d target objects. "
+        + "You either specified a wrong 'keyProperty' or encountered a driver bug like #1523.";
+
+    @Override
+    public void processBefore(Executor executor, MappedStatement ms, Statement stmt, Object parameter) {
+        // do nothing
+    }
+
+    @Override
+    public void processAfter(Executor executor, MappedStatement ms, Statement stmt, Object parameter) {
+        processBatch(ms, stmt, parameter);
+    }
+
+    public void processBatch(MappedStatement ms, Statement stmt, Object parameter) {
+        // 指定的 keyProperties，<insert> 标签属性指定
+        final String[] keyProperties = ms.getKeyProperties();
+        if (keyProperties == null || keyProperties.length == 0) {
+            return;
+        }
+        // Statement 中获取 ResultSet
+        try (ResultSet rs = stmt.getGeneratedKeys()) {
+            final ResultSetMetaData rsmd = rs.getMetaData();
+            final Configuration configuration = ms.getConfiguration();
+            if (rsmd.getColumnCount() < keyProperties.length) {
+                // Error?
+            } else {
+                // 从 ResultSet 中获取指定 keyProperty 的 value，并设置到实体参数 parameter 中
+                assignKeys(configuration, rs, rsmd, keyProperties, parameter);
+            }
+        } catch (Exception e) {
+            throw new ExecutorException("Error getting generated key or setting result to parameter object. Cause: " + e, e);
+        }
+    }
+}
+```
+
+##### SelectKeyGenerator
 
  SelectKeyGenerator 中的 processBefore 和 processAfter 是互斥的，只会执行一个。
 

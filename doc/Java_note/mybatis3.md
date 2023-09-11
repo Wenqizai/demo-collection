@@ -4454,3 +4454,267 @@ public <E> List<E> query(Statement statement, ResultHandler resultHandler) throw
 
 CallableStatementHandler 是处理存储过程的 StatementHandler 实现。
 
+## Executor
+
+Executor 定义操作数据库的基本方法，基本上是封装 JDBC SqlSession 那一套。
+
+![image-20230911142722445](mybatis3.assets/image-20230911142722445.png)
+
+- 接口定义
+
+```java
+public interface Executor {
+
+    ResultHandler NO_RESULT_HANDLER = null;
+	// update, insert, delete 都是这个入口
+    int update(MappedStatement ms, Object parameter) throws SQLException;
+
+    <E> List<E> query(MappedStatement ms, Object parameter, RowBounds rowBounds, ResultHandler resultHandler, CacheKey cacheKey, BoundSql boundSql) throws SQLException;
+
+    <E> List<E> query(MappedStatement ms, Object parameter, RowBounds rowBounds, ResultHandler resultHandler) throws SQLException;
+
+    <E> Cursor<E> queryCursor(MappedStatement ms, Object parameter, RowBounds rowBounds) throws SQLException;
+	// 批量执行 SQL 语句， 创建多个 MappedStatement，批量执行
+    List<BatchResult> flushStatements() throws SQLException;
+
+    void commit(boolean required) throws SQLException;
+
+    void rollback(boolean required) throws SQLException;
+	// 创建换成用的的 cacheKey 对象
+    CacheKey createCacheKey(MappedStatement ms, Object parameterObject, RowBounds rowBounds, BoundSql boundSql);
+	// 根据 cacheKey 判断是否有缓存对象
+    boolean isCached(MappedStatement ms, CacheKey key);
+	// 清空一级缓存
+    void clearLocalCache();
+	// 延迟加载一级缓存中的数据
+    void deferLoad(MappedStatement ms, MetaObject resultObject, String property, CacheKey key, Class<?> targetType);
+
+    Transaction getTransaction();
+
+    void close(boolean forceRollback);
+
+    boolean isClosed();
+
+    void setExecutorWrapper(Executor executor);
+
+}
+```
+
+### BaseExecutor
+
+BaseExecutor 抽象类，定义 Executor 执行的模板方法。
+
+```java
+public abstract class BaseExecutor implements Executor {
+    protected Transaction transaction;
+    // 包装类
+    protected Executor wrapper;
+    // 延迟加载队列
+    protected ConcurrentLinkedQueue<DeferredLoad> deferredLoads;
+    // 一级缓存
+    protected PerpetualCache localCache;
+    protected PerpetualCache localOutputParameterCache;
+    protected Configuration configuration;
+    // 嵌套查询的层数
+    protected int queryStack;
+    private boolean closed;
+
+    protected BaseExecutor(Configuration configuration, Transaction transaction) {
+        this.transaction = transaction;
+        this.deferredLoads = new ConcurrentLinkedQueue<>();
+        this.localCache = new PerpetualCache("LocalCache");
+        this.localOutputParameterCache = new PerpetualCache("LocalOutputParameterCache");
+        this.closed = false;
+        this.configuration = configuration;
+        this.wrapper = this;
+    }
+
+    @Override
+    public void setExecutorWrapper(Executor wrapper) {
+        this.wrapper = wrapper;
+    }
+
+    // 需要子类实现的抽象方法
+    protected abstract int doUpdate(MappedStatement ms, Object parameter)
+        throws SQLException;
+
+    protected abstract List<BatchResult> doFlushStatements(boolean isRollback)
+        throws SQLException;
+
+    protected abstract <E> List<E> doQuery(MappedStatement ms, Object parameter, RowBounds rowBounds, ResultHandler resultHandler, BoundSql boundSql)
+        throws SQLException;
+
+    protected abstract <E> Cursor<E> doQueryCursor(MappedStatement ms, Object parameter, RowBounds rowBounds, BoundSql boundSql)
+        throws SQLException;
+
+
+}
+```
+
+#### 一级缓存
+
+> 关于 BaseExecutor 中的缓存管理
+
+![image-20230911153037572](material/MyBatis/Executor一级缓存管理.png)
+
+1. 缓存的 cacheKey
+
+   org.apache.ibatis.executor.BaseExecutor#createCacheKey
+
+   可以简单理解这个 cacheKey 是所有入参、sql语句的集合。这些相同时，cacheKey 也相同。
+
+2. 使用缓存
+
+`org.apache.ibatis.executor.BaseExecutor#query(org.apache.ibatis.mapping.MappedStatement, java.lang.Object, org.apache.ibatis.session.RowBounds, org.apache.ibatis.session.ResultHandler, org.apache.ibatis.cache.CacheKey, org.apache.ibatis.mapping.BoundSql)`
+
+```java
+public <E> List<E> query(MappedStatement ms, Object parameter, RowBounds rowBounds, ResultHandler resultHandler, CacheKey key, BoundSql boundSql) throws SQLException {
+    // 首次清理缓存
+    if (queryStack == 0 && ms.isFlushCacheRequired()) {
+        clearLocalCache();
+    }
+    List<E> list;
+    try {
+        queryStack++;
+        // 获取缓存
+        list = resultHandler == null ? (List<E>) localCache.getObject(key) : null;
+        if (list != null) {
+            handleLocallyCachedOutputParameters(ms, key, parameter, boundSql);
+        } else {
+            // 缓存不存在， 查数据库
+            list = queryFromDatabase(ms, parameter, rowBounds, resultHandler, key, boundSql);
+        }
+    } finally {
+        queryStack--;
+    }
+}
+```
+
+2. 加载缓存
+
+`org.apache.ibatis.executor.BaseExecutor#queryFromDatabase`
+
+```java
+private <E> List<E> queryFromDatabase(MappedStatement ms, Object parameter, RowBounds rowBounds, ResultHandler resultHandler, CacheKey key, BoundSql boundSql) throws SQLException {
+    List<E> list;
+    // 我猜这里是为了释放旧缓存对象，方便 GC
+    // 猜错了， 跟延迟加载有关的
+    localCache.putObject(key, EXECUTION_PLACEHOLDER);
+    try {
+        list = doQuery(ms, parameter, rowBounds, resultHandler, boundSql);
+    } finally {
+        // doQuery 报错，需要清掉 key
+        localCache.removeObject(key);
+    }
+    // 放入缓存
+    localCache.putObject(key, list);
+    if (ms.getStatementType() == StatementType.CALLABLE) {
+        localOutputParameterCache.putObject(key, parameter);
+    }
+    return list;
+}
+```
+
+3. 清理缓存
+
+触发清理缓存的地方：update()、commit()、rollback()、close()等方法的调用。
+
+```java
+@Override
+public int update(MappedStatement ms, Object parameter) throws SQLException {
+    // 这里是清空所有的 key 的缓存
+    clearLocalCache();
+    return doUpdate(ms, parameter);
+}
+
+@Override
+public void commit(boolean required) throws SQLException {
+    if (closed) {
+        throw new ExecutorException("Cannot commit, transaction is already closed");
+    }
+    clearLocalCache();
+    flushStatements();
+    if (required) {
+        transaction.commit();
+    }
+}
+
+@Override
+public void rollback(boolean required) throws SQLException {
+    if (!closed) {
+        try {
+            clearLocalCache();
+            flushStatements(true);
+        } finally {
+            if (required) {
+                transaction.rollback();
+            }
+        }
+    }
+}
+
+@Override
+public void close(boolean forceRollback) {
+    try {
+        try {
+            rollback(forceRollback);
+        } finally {
+            if (transaction != null) {
+                transaction.close();
+            }
+        }
+    } catch (SQLException e) {
+        // Ignore.  There's nothing that can be done at this point.
+        log.warn("Unexpected exception on closing transaction.  Cause: " + e);
+    } finally {
+        transaction = null;
+        deferredLoads = null;
+        localCache = null;
+        localOutputParameterCache = null;
+        closed = true;
+    }
+}
+
+@Override
+public void clearLocalCache() {
+    if (!closed) {
+        localCache.clear();
+        localOutputParameterCache.clear();
+    }
+}
+```
+
+#### 延迟加载
+
+延迟加载的关键点是标志位的处理，比如正在加载中或加载完成的缓存。
+
+```java
+protected ConcurrentLinkedQueue<DeferredLoad> deferredLoads;
+
+@Override
+public void deferLoad(MappedStatement ms, MetaObject resultObject, String property, CacheKey key, Class<?> targetType) {
+    if (closed) {
+        throw new ExecutorException("Executor was closed.");
+    }
+    DeferredLoad deferredLoad = new DeferredLoad(resultObject, property, key, localCache, configuration, targetType);
+    // 检查一级缓存加载的标志位
+    if (deferredLoad.canLoad()) {
+        // 直接加载
+        deferredLoad.load();
+    } else {
+        // 如果处于一级缓存加载期间，需要放到队列中，等待加载
+        deferredLoads.add(new DeferredLoad(resultObject, property, key, localCache, configuration, targetType));
+    }
+}
+
+public boolean canLoad() {
+    return localCache.getObject(key) != null && localCache.getObject(key) != EXECUTION_PLACEHOLDER;
+}
+```
+
+
+
+
+
+
+

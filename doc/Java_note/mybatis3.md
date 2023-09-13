@@ -2756,7 +2756,11 @@ public <E> List<E> query(MappedStatement ms, Object parameterObject, RowBounds r
 
 ##### 配置与使用
 
-1. Mybatis-config.xml中配置	=> 	开启二级缓存
+> 开启二级缓存，必须满足以下2个条件才生效
+
+**如果已经配置以下 2 个条件，相当于在 Mapper 命名空间中创建了一个 cache 对象，但是要注意此时 cache 对象是空的，还没有任何缓存的加入。**
+
+1. Mybatis-config.xml中配置	=> 	全局开启二级缓存，创建缓存 Executor
 
 ```xml
 <setting name="cacheEnabled" value="true"/>
@@ -2768,12 +2772,22 @@ public <E> List<E> query(MappedStatement ms, Object parameterObject, RowBounds r
 <!-- 该NameSpace开启二级缓存 -->
 <cache/>   
 <!-- cache-ref代表引用别的命名空间的Cache配置，两个命名空间的操作使用的是同一个Cache。 -->
+<!-- 比如这里的 cache-ref，使用 mapper.StudentMapper 命名空间的 cache，不是自身命名空间的 cache -->
 <cache-ref namespace="mapper.StudentMapper"/>
 ```
 
-- cache-ref
+**注意：**cache-ref
 
-  相当于多个NameSpace共用同一个缓存，缓存粒度更粗，意味这多个Mapper NameSpace下的所有操作都会对缓存使用造成影响。
+相当于多个NameSpace共用同一个缓存，缓存粒度更粗，意味这多个Mapper NameSpace下的所有操作都会对缓存使用造成影响。
+
+3. sql 标签中使用二级缓存
+
+```xml
+<select ... flushCache="false" useCache="true"/>
+<insert ... flushCache="true"/>
+<update ... flushCache="true"/>
+<delete ... flushCache="true"/>
+```
 
 # 核心处理层
 
@@ -4458,9 +4472,35 @@ CallableStatementHandler 是处理存储过程的 StatementHandler 实现。
 
 Executor 定义操作数据库的基本方法，基本上是封装 JDBC SqlSession 那一套。
 
-![image-20230911142722445](mybatis3.assets/image-20230911142722445.png)
+![image-20230912094646036](material/MyBatis/Executor相关类.png)
 
-- 接口定义
+> 应该使用哪一个 Executor？
+
+MyBatis 在启动阶段已经完成 Executor 的指定和创建。
+
+`org.apache.ibatis.session.Configuration#newExecutor(org.apache.ibatis.transaction.Transaction, org.apache.ibatis.session.ExecutorType)`
+
+```java
+public Executor newExecutor(Transaction transaction, ExecutorType executorType) {
+    executorType = executorType == null ? defaultExecutorType : executorType;
+    executorType = executorType == null ? ExecutorType.SIMPLE : executorType;
+    Executor executor;
+    if (ExecutorType.BATCH == executorType) {
+        executor = new BatchExecutor(this, transaction);
+    } else if (ExecutorType.REUSE == executorType) {
+        executor = new ReuseExecutor(this, transaction);
+    } else {
+        executor = new SimpleExecutor(this, transaction);
+    }
+    if (cacheEnabled) {
+        executor = new CachingExecutor(executor);
+    }
+    executor = (Executor) interceptorChain.pluginAll(executor);
+    return executor;
+}
+```
+
+> 接口定义
 
 ```java
 public interface Executor {
@@ -4552,6 +4592,8 @@ public abstract class BaseExecutor implements Executor {
 ```
 
 #### 一级缓存
+
+默认开启，session 级别，无法指定是否开启。<u>见 BaseExecutor 的构建方法，默认创建 PerpetualCache，id 写死为 “LocalCache”。</u>
 
 > 关于 BaseExecutor 中的缓存管理
 
@@ -4711,6 +4753,720 @@ public boolean canLoad() {
     return localCache.getObject(key) != null && localCache.getObject(key) != EXECUTION_PLACEHOLDER;
 }
 ```
+
+### SimpleExecutor
+
+SimpleExecutor 继承于 BaseExecutor，并实现其定义抽象方法，最简单的 Executor 接口实现。
+
+SimpleExecutor 需要注意的地方：
+
+```java
+@Override
+public List<BatchResult> doFlushStatements(boolean isRollback) {
+    return Collections.emptyList();
+}
+
+private Statement prepareStatement(StatementHandler handler, Log statementLog) throws SQLException {
+    Statement stmt;
+    Connection connection = getConnection(statementLog);
+    stmt = handler.prepare(connection, transaction.getTimeout());
+    handler.parameterize(stmt);
+    return stmt;
+}
+```
+
+### ReuseExecutor
+
+ReuseExecutor 实现方法与 SimpleExecutor 大致相同，但是为了减少 SQL 预编译的开销以及创建和销毁 Statement 对象的开销，ReuseExecutor 选择重用 Statement。
+
+如下代码逻辑：每次执行 SQL 语句时，会调用 `prepareStatement()` 方法获取 Statement 对象，该方法处理 Statement 对象的创建与复用。
+
+**需要注意的是**，调用 `doFlushStatements()` 方法时才会清空缓存的 Statement 对象，需要留意 `doFlushStatements()` 方法调用时机，大部分都是维持 session 级别的。对于其他的 Executor，如 SimpleExecutor、BatchExecutor 会在查询结束后调用 `closeStatement(stmt);`，而 ReuseExecutor 不会。
+
+```java
+public class ReuseExecutor extends BaseExecutor {
+    // key: sql语句，value：Statment 对象
+    private final Map<String, Statement> statementMap = new HashMap<>();
+
+    @Override
+    public List<BatchResult> doFlushStatements(boolean isRollback) {
+        for (Statement stmt : statementMap.values()) {
+            closeStatement(stmt);
+        }
+        statementMap.clear();
+        return Collections.emptyList();
+    }
+
+    private Statement prepareStatement(StatementHandler handler, Log statementLog) throws SQLException {
+        Statement stmt;
+        // 获取 SQL
+        BoundSql boundSql = handler.getBoundSql();
+        String sql = boundSql.getSql();
+        // 检查是否缓存了 statement
+        if (hasStatementFor(sql)) {
+            stmt = getStatement(sql);
+            // 重新设置事务超时时间
+            applyTransactionTimeout(stmt);
+        } else {
+            Connection connection = getConnection(statementLog);
+            stmt = handler.prepare(connection, transaction.getTimeout());
+            putStatement(sql, stmt);
+        }
+        // 处理占位符
+        handler.parameterize(stmt);
+        return stmt;
+    }
+
+    private boolean hasStatementFor(String sql) {
+        try {
+            return statementMap.keySet().contains(sql) && !statementMap.get(sql).getConnection().isClosed();
+        } catch (SQLException e) {
+            return false;
+        }
+    }
+
+    private Statement getStatement(String s) {
+        return statementMap.get(s);
+    }
+
+    private void putStatement(String sql, Statement stmt) {
+        statementMap.put(sql, stmt);
+    }
+
+}
+```
+
+### BatchExecutor
+
+BatchExecutor，实现了批量执行 sql 的 executor。目前仅支持的批量 SQL：insert、update、delete，对于 select 的语句 BatchExecutor 的方法与 SimpleExecutor 方法大致相同，仅仅多加了 `flushStatements()` 的调用。
+
+```java
+public class BatchExecutor extends BaseExecutor {
+    // update, insert, delete 的返回值
+    public static final int BATCH_UPDATE_RETURN_VALUE = Integer.MIN_VALUE + 1002;
+
+    // 缓存多个 Statement 对象，每个 Statement 对象缓存一批 SQL
+    private final List<Statement> statementList = new ArrayList<>();
+    // 批量处理的结果
+    private final List<BatchResult> batchResultList = new ArrayList<>();
+    // 当前执行的 sql
+    private String currentSql;
+    // 当前执行的 statement
+    private MappedStatement currentStatement;
+}
+```
+
+> 批量的方法 doUpdate
+
+如下可知，`doUpdate()` 方法仅处理 session 和 statement 复用的问题，并未真正执行的 SQL 语句，所以也就没有返回结果啦。那么真正执行 SQL 语句的方法时，调用 `commit()` 方法后的 `doFlushStatements(boolean isRollback)`。
+
+```java
+@Override
+public int doUpdate(MappedStatement ms, Object parameterObject) throws SQLException {
+    final Configuration configuration = ms.getConfiguration();
+    final StatementHandler handler = configuration.newStatementHandler(this, ms, parameterObject, RowBounds.DEFAULT, null, null);
+    final BoundSql boundSql = handler.getBoundSql();
+    final String sql = boundSql.getSql();
+    final Statement stmt;
+    // 非首次执行时，用回原来的 session 和 statement，提供性能
+    if (sql.equals(currentSql) && ms.equals(currentStatement)) {
+        int last = statementList.size() - 1;
+        stmt = statementList.get(last);
+        applyTransactionTimeout(stmt);
+        // 处理占位符，绑定实参
+        handler.parameterize(stmt);//fix Issues 322
+        BatchResult batchResult = batchResultList.get(last);
+        batchResult.addParameterObject(parameterObject);
+    } else {
+        // 首次执行时
+        Connection connection = getConnection(ms.getStatementLog());
+        stmt = handler.prepare(connection, transaction.getTimeout());
+        // 处理占位符，绑定实参
+        handler.parameterize(stmt);    //fix Issues 322
+        currentSql = sql;
+        currentStatement = ms;
+        statementList.add(stmt);
+        batchResultList.add(new BatchResult(ms, sql, parameterObject));
+    }
+    
+    // 底层调用 statement.addBath() 方法添加 SQL 语句
+    handler.batch(stmt);
+    
+    return BATCH_UPDATE_RETURN_VALUE;
+}
+```
+
+> 真正执行批量的方法 doFlushStatements(boolean isRollback)
+
+```java
+@Override
+public List<BatchResult> doFlushStatements(boolean isRollback) throws SQLException {
+    try {
+        // 存储批处理结果
+        List<BatchResult> results = new ArrayList<>();
+        if (isRollback) {
+            return Collections.emptyList();
+        }
+
+        // 遍历缓存的 statementList
+        for (int i = 0, n = statementList.size(); i < n; i++) {
+            // 获取缓存的 statement
+            Statement stmt = statementList.get(i);
+            applyTransactionTimeout(stmt);
+            // 获取对应的 batchResult 对象
+            BatchResult batchResult = batchResultList.get(i);
+            
+            try {
+                // 调用 statement.executeBatch(), 执行批量方法
+                // 返回值 int[]，每批 SQL 的影响行数
+                batchResult.setUpdateCounts(stmt.executeBatch());
+                
+                // 处理主键生成逻辑 KeyGenerator
+                MappedStatement ms = batchResult.getMappedStatement();
+                List<Object> parameterObjects = batchResult.getParameterObjects();
+                KeyGenerator keyGenerator = ms.getKeyGenerator();
+                if (Jdbc3KeyGenerator.class.equals(keyGenerator.getClass())) {
+                    Jdbc3KeyGenerator jdbc3KeyGenerator = (Jdbc3KeyGenerator) keyGenerator;
+                    jdbc3KeyGenerator.processBatch(ms, stmt, parameterObjects);
+                } else if (!NoKeyGenerator.class.equals(keyGenerator.getClass())) { //issue #141
+                    for (Object parameter : parameterObjects) {
+                        keyGenerator.processAfter(this, ms, stmt, parameter);
+                    }
+                }
+                
+                // 关闭 statement
+                // Close statement to close cursor #1109
+                closeStatement(stmt);
+            } catch (BatchUpdateException e) {
+                StringBuilder message = new StringBuilder();
+                message.append(batchResult.getMappedStatement().getId())
+                    .append(" (batch index #")
+                    .append(i + 1)
+                    .append(")")
+                    .append(" failed.");
+                if (i > 0) {
+                    message.append(" ")
+                        .append(i)
+                        .append(" prior sub executor(s) completed successfully, but will be rolled back.");
+                }
+                throw new BatchExecutorException(message.toString(), e, results, batchResult);
+            }
+            results.add(batchResult);
+        }
+        return results;
+    } finally {
+        for (Statement stmt : statementList) {
+            closeStatement(stmt);
+        }
+        currentSql = null;
+        statementList.clear();
+        batchResultList.clear();
+    }
+}
+```
+
+### CachingExecutor
+
+CachingExecutor 使用装饰器模式，用来处理 MyBatis 的二级缓存，我们知道一级缓存 BaseExecutor 已经处理。
+
+#### 二级缓存
+
+##### 全局开关
+
+步骤源码分析如下，但需要注意这只是开启二级缓存的第一个开关，还没有完全开启。接下来需要配置命名空间缓存来开启二级缓存。
+
+- mybatis-config.xml 指定配置
+
+```xml
+<!-- mybatis-config.xml -->
+<settings>
+    <setting name="cacheEnabled"value="true"/>
+</settings>
+```
+
+- 解析配置
+
+源码：`org.apache.ibatis.builder.xml.XMLConfigBuilder#settingsElement`
+
+可以看到即使 cacheEnabled 没有配置，mybatis 默认也是给 true 的。
+
+```java
+private void settingsElement(Properties props) {
+    configuration.setCacheEnabled(booleanValueOf(props.getProperty("cacheEnabled"), true));
+}
+```
+
+- 创建装饰类 CachingExecutor，开启二级缓存
+
+源码：`org.apache.ibatis.session.Configuration#newExecutor(org.apache.ibatis.transaction.Transaction, org.apache.ibatis.session.ExecutorType)`
+
+```java
+public Executor newExecutor(Transaction transaction, ExecutorType executorType) {
+    executorType = executorType == null ? defaultExecutorType : executorType;
+    executorType = executorType == null ? ExecutorType.SIMPLE : executorType;
+    Executor executor;
+    if (ExecutorType.BATCH == executorType) {
+        executor = new BatchExecutor(this, transaction);
+    } else if (ExecutorType.REUSE == executorType) {
+        executor = new ReuseExecutor(this, transaction);
+    } else {
+        executor = new SimpleExecutor(this, transaction);
+    }
+    
+    // 开启二级缓存
+    if (cacheEnabled) {
+        executor = new CachingExecutor(executor);
+    }
+    
+    executor = (Executor) interceptorChain.pluginAll(executor);
+    return executor;
+}
+```
+
+##### 命名空间缓存开关
+
+- Mapper 中配置
+
+1. 如果 Mapper 命名空间配置了 `<cache/>`，就会在该命名空间创建一个 cache 对象。中创建了一个 cache 对象，但是要注意此时 cache 对象是空的，还没有任何缓存的加入。
+
+2. 如果 Mapper 命名空间配置了 `<cache-ref/>`，就会在将该命名空间 cache 对象引用到其他命名空间的 cache（被替换了）。
+
+3. 如果 Mapper 命名空间同时配置了 `<cache/>` 和 `<cache-ref/>`，就会在将该命名空间 cache 对象引用到其他命名空间的 cache（被替换了），自己命名空间的 cache 对象将会被舍弃。
+4. 如果配置了 `<cache-ref/>`，引用的命名空间必须要配置 `<cache/>`，否则启动报错。
+
+**命名空间缓存开关，只是在命名空间中创建了一个 cache 对象，但是要注意此时 cache 对象是空的，还没有任何缓存的加入，所以需要指定加入缓存，二级缓存才生效。**
+
+cache：key -> 命名空间	value -> mybatis cache 的实现
+
+```xml
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+  "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="wenqi.RoleMapper">
+    
+    <!-- 该 Mapper NameSpace 开启二级缓存 -->
+    <cache/>  
+    
+    <!-- cache-ref代表引用别的命名空间的Cache配置，两个命名空间的操作使用的是同一个Cache。 -->
+    <!-- 比如这里的 cache-ref，使用 mapper.StudentMapper 命名空间的 cache，不是自身命名空间的 cache -->
+    <cache-ref namespace="mapper.StudentMapper"/>
+
+</mapper>
+```
+
+- 源码解析
+
+1. 解析 `<mapper>` 标签
+
+```java
+// org.apache.ibatis.builder.xml.XMLMapperBuilder#configurationElement
+private void configurationElement(XNode context) {
+    // 解析 cache-ref 标签
+    cacheRefElement(context.evalNode("cache-ref"));
+    // 解析 cache 标签
+    cacheElement(context.evalNode("cache"));
+}
+```
+
+2. 创建 cache
+
+源码可知：解析 `<cache/>` 标签会创建一个 cache对象。而 `<cache-ref/>` 并未创建 cache 对象，而是寻找引用的 cache 对象。因为解析 Mapper.xml 有先后顺序，当获取引用的 cache 对象还没创建时，则加入到待解析的队列中，后续待引用 cache 对象创建之后再次获取。
+
+```java
+// org.apache.ibatis.builder.xml.XMLMapperBuilder#cacheRefElement
+private void cacheRefElement(XNode context) {
+    if (context != null) {
+        configuration.addCacheRef(builderAssistant.getCurrentNamespace(), context.getStringAttribute("namespace"));
+        CacheRefResolver cacheRefResolver = new CacheRefResolver(builderAssistant, context.getStringAttribute("namespace"));
+        try {
+            // 如果引用的 cache 不存在则解析失败
+            cacheRefResolver.resolveCacheRef();
+        } catch (IncompleteElementException e) {
+            // 加入 incompleteCacheRefs 待解析 cache-ref 引用的 cache
+            configuration.addIncompleteCacheRef(cacheRefResolver);
+        }
+    }
+}
+
+// org.apache.ibatis.builder.xml.XMLMapperBuilder#cacheElement
+private void cacheElement(XNode context) {
+    if (context != null) {
+        String type = context.getStringAttribute("type", "PERPETUAL");
+        Class<? extends Cache> typeClass = typeAliasRegistry.resolveAlias(type);
+        String eviction = context.getStringAttribute("eviction", "LRU");
+        Class<? extends Cache> evictionClass = typeAliasRegistry.resolveAlias(eviction);
+        Long flushInterval = context.getLongAttribute("flushInterval");
+        Integer size = context.getIntAttribute("size");
+        boolean readWrite = !context.getBooleanAttribute("readOnly", false);
+        boolean blocking = context.getBooleanAttribute("blocking", false);
+        Properties props = context.getChildrenAsProperties();
+        builderAssistant.useNewCache(typeClass, evictionClass, flushInterval, size, readWrite, blocking, props);
+    }
+}
+```
+
+3. 引用 cache 替换
+
+currentCache 为二级缓存真正使用的 cache 对象，如果配置了`<cache-ref/>` 引用的对象，则 currentCache 为引用命名空间的 cache 的对象。
+
+```java
+// org.apache.ibatis.builder.CacheRefResolver#resolveCacheRef
+public Cache resolveCacheRef() {
+    return assistant.useCacheRef(cacheRefNamespace);
+}
+
+// org.apache.ibatis.builder.MapperBuilderAssistant#useCacheRef
+public Cache useCacheRef(String namespace) {
+    if (namespace == null) {
+        throw new BuilderException("cache-ref element requires a namespace attribute.");
+    }
+    try {
+        unresolvedCacheRef = true;
+        // 根据命名空间获取 cache
+        Cache cache = configuration.getCache(namespace);
+        if (cache == null) {
+            throw new IncompleteElementException("No cache for namespace '" + namespace + "' could be found.");
+        }
+        
+        // 注意这里的 currentCache，这个是最终加入到命名空间使用的缓存
+        currentCache = cache;
+        unresolvedCacheRef = false;
+        
+        return cache;
+    } catch (IllegalArgumentException e) {
+        throw new IncompleteElementException("No cache for namespace '" + namespace + "' could be found.", e);
+    }
+}
+```
+
+4. 构建二级缓存 cache 对象
+
+源码：`org.apache.ibatis.builder.MapperBuilderAssistant#addMappedStatement(java.lang.String, org.apache.ibatis.mapping.SqlSource, org.apache.ibatis.mapping.StatementType, org.apache.ibatis.mapping.SqlCommandType, java.lang.Integer, java.lang.Integer, java.lang.String, java.lang.Class<?>, java.lang.String, java.lang.Class<?>, org.apache.ibatis.mapping.ResultSetType, boolean, boolean, boolean, org.apache.ibatis.executor.keygen.KeyGenerator, java.lang.String, java.lang.String, java.lang.String, org.apache.ibatis.scripting.LanguageDriver, java.lang.String)`
+
+这里构建的 cache 对象会加入到 MappedStatement 中，生效范围是命名空间。
+
+5. 补充 cache-ref 解析失败队列解析
+
+```java
+// org.apache.ibatis.builder.xml.XMLMapperBuilder#parsePendingCacheRefs
+private void parsePendingCacheRefs() {
+    Collection<CacheRefResolver> incompleteCacheRefs = configuration.getIncompleteCacheRefs();
+    synchronized (incompleteCacheRefs) {
+        Iterator<CacheRefResolver> iter = incompleteCacheRefs.iterator();
+        while (iter.hasNext()) {
+            try {
+                // 这里解析失败了，后面方法会兜底
+                iter.next().resolveCacheRef();
+                iter.remove();
+            } catch (IncompleteElementException e) {
+                // Cache ref is still missing a resource...
+            }
+        }
+    }
+}
+
+// org.apache.ibatis.session.Configuration#buildAllStatements
+protected void buildAllStatements() {
+    parsePendingResultMaps();
+    // 最后解析待解析的 cache-ref，此时所有的命名空间 cache 已经创建完毕，若这里解析失败，则启动事变
+    if (!incompleteCacheRefs.isEmpty()) {
+        synchronized (incompleteCacheRefs) {
+            incompleteCacheRefs.removeIf(x -> x.resolveCacheRef() != null);
+        }
+    }
+    if (!incompleteStatements.isEmpty()) {
+        synchronized (incompleteStatements) {
+            incompleteStatements.removeIf(x -> {
+                x.parseStatementNode();
+                return true;
+            });
+        }
+    }
+    if (!incompleteMethods.isEmpty()) {
+        synchronized (incompleteMethods) {
+            incompleteMethods.removeIf(x -> {
+                x.resolve();
+                return true;
+            });
+        }
+    }
+}
+```
+
+##### 加入二级缓存
+
+sql 标签中使用二级缓存。
+
+- flushCache == true：每次 sql 执行，刷新二级缓存
+- useCache == true: 每次 sql 执行，加入二级缓存或获取二级缓存
+- 获取二级缓存的 key，是 CacheKey，即 sql 语句和绑定参数的组装。
+- 关于二级缓存的使用和管理，可见 CachingExecutor。
+
+```xml
+<select ... flushCache="false" useCache="true"/>
+<insert ... flushCache="true"/>
+<update ... flushCache="true"/>
+<delete ... flushCache="true"/>
+```
+
+关于参数的默认值
+
+- select 语句：flushCache = false，useCache = true
+- 非 select 语句：flushCache = true，useCache = false
+
+```java
+// org.apache.ibatis.builder.MapperBuilderAssistant#addMappedStatement(java.lang.String, org.apache.ibatis.mapping.SqlSource, org.apache.ibatis.mapping.StatementType, org.apache.ibatis.mapping.SqlCommandType, java.lang.Integer, java.lang.Integer, java.lang.String, java.lang.Class<?>, java.lang.String, java.lang.Class<?>, org.apache.ibatis.mapping.ResultSetType, boolean, boolean, boolean, org.apache.ibatis.executor.keygen.KeyGenerator, java.lang.String, java.lang.String, java.lang.String, org.apache.ibatis.scripting.LanguageDriver, java.lang.String)
+MappedStatement.Builder statementBuilder = new MappedStatement.Builder(configuration, id, sqlSource, sqlCommandType)
+	// 非 select 语句
+    .flushCacheRequired(valueOrDefault(flushCache, !isSelect))
+    // select 语句
+    .useCache(valueOrDefault(useCache, isSelect))
+    .cache(currentCache);
+```
+
+#### TransactionalCacheManager
+
+TransactionalCacheManager，是 CachingExecutor 依赖的重要组件，主要负责管理多个不同事务缓存的二级提交和回滚，完成事务的隔离，防止缓存脏读。
+
+关于事务缓存的设计解读，可参考《MyBatis技术内幕》关于 TransactionalCacheManager 的章节。
+
+```java
+public class TransactionalCacheManager {
+	// 维护的二级缓存
+    // key -> cache 命名空间的二级缓存  value -> 事务缓存
+    private final Map<Cache, TransactionalCache> transactionalCaches = new HashMap<>();
+
+    public void clear(Cache cache) {
+        getTransactionalCache(cache).clear();
+    }
+
+    public Object getObject(Cache cache, CacheKey key) {
+        return getTransactionalCache(cache).getObject(key);
+    }
+
+    public void putObject(Cache cache, CacheKey key, Object value) {
+        getTransactionalCache(cache).putObject(key, value);
+    }
+
+    public void commit() {
+        for (TransactionalCache txCache : transactionalCaches.values()) {
+            txCache.commit();
+        }
+    }
+
+    public void rollback() {
+        for (TransactionalCache txCache : transactionalCaches.values()) {
+            txCache.rollback();
+        }
+    }
+
+    // 创建一个事务缓存，以二级缓存作为 key
+    private TransactionalCache getTransactionalCache(Cache cache) {
+        return transactionalCaches.computeIfAbsent(cache, TransactionalCache::new);
+    }
+
+}
+```
+
+#### TransactionalCache
+
+TransactionalCache 实现了 Cache 接口，通过委托类 `Cache delegate`实现二级缓存功能。TransactionalCache 主要负责缓存的事务管理，而 delegate 负责实现缓存功能。
+
+每次 commit、rollback 都会调用 reset() 方法。
+
+```java
+public class TransactionalCache implements Cache {
+
+    private static final Log log = LogFactory.getLog(TransactionalCache.class);
+	// 这个是二级缓存类
+    private final Cache delegate;
+    // 提交事务时，清空二级缓存，且当前的事务缓存不可以查
+    private boolean clearOnCommit;
+    // 暂存的二级缓存
+    private final Map<Object, Object> entriesToAddOnCommit;
+    // 未命中的二级缓存
+    private final Set<Object> entriesMissedInCache;
+
+    public TransactionalCache(Cache delegate) {
+        this.delegate = delegate;
+        this.clearOnCommit = false;
+        this.entriesToAddOnCommit = new HashMap<>();
+        this.entriesMissedInCache = new HashSet<>();
+    }
+
+    @Override
+    public String getId() {
+        return delegate.getId();
+    }
+
+    @Override
+    public int getSize() {
+        return delegate.getSize();
+    }
+
+    @Override
+    public Object getObject(Object key) {
+        // issue #116
+        Object object = delegate.getObject(key);
+        if (object == null) {
+            entriesMissedInCache.add(key);
+        }
+        // clearOnCommit = true 当前事务缓存不可以查，因为当前二级缓存已经清理，不可返回脏数据
+        // 当调用 reset() 时，标志位会复位
+        // issue #146
+        if (clearOnCommit) {
+            return null;
+        } else {
+            return object;
+        }
+    }
+
+    @Override
+    public void putObject(Object key, Object object) {
+        entriesToAddOnCommit.put(key, object);
+    }
+
+    @Override
+    public Object removeObject(Object key) {
+        return null;
+    }
+
+    @Override
+    public void clear() {
+        clearOnCommit = true;
+        entriesToAddOnCommit.clear();
+    }
+
+    public void commit() {
+        if (clearOnCommit) {
+            delegate.clear();
+        }
+        flushPendingEntries();
+        reset();
+    }
+
+    public void rollback() {
+        unlockMissedEntries();
+        reset();
+    }
+
+    private void reset() {
+        clearOnCommit = false;
+        entriesToAddOnCommit.clear();
+        entriesMissedInCache.clear();
+    }
+
+    private void flushPendingEntries() {
+        for (Map.Entry<Object, Object> entry : entriesToAddOnCommit.entrySet()) {
+            delegate.putObject(entry.getKey(), entry.getValue());
+        }
+        for (Object entry : entriesMissedInCache) {
+            if (!entriesToAddOnCommit.containsKey(entry)) {
+                delegate.putObject(entry, null);
+            }
+        }
+    }
+
+    private void unlockMissedEntries() {
+        for (Object entry : entriesMissedInCache) {
+            try {
+                delegate.removeObject(entry);
+            } catch (Exception e) {
+                log.warn("Unexpected exception while notifiying a rollback to the cache adapter. "
+                         + "Consider upgrading your cache adapter to the latest version. Cause: " + e);
+            }
+        }
+    }
+
+}
+```
+
+#### CachingExecutor
+
+- 二级缓存使用方法
+
+```java
+public <E> List<E> query(MappedStatement ms, Object parameterObject, RowBounds rowBounds, ResultHandler resultHandler, CacheKey key, BoundSql boundSql) throws SQLException {
+    // 获取二级缓存对象
+    Cache cache = ms.getCache();
+    if (cache != null) {
+        flushCacheIfRequired(ms);
+        // sql 标签中是否配置了 useCache = true
+        if (ms.isUseCache() && resultHandler == null) {
+            // 确保 sql 不是使用 输出类型参数，如 存储过程StatementType.CALLABLE + 不是 in 条件
+            ensureNoOutParams(ms, boundSql);
+            
+            // 查询、获取、保存二级缓存
+            List<E> list = (List<E>) tcm.getObject(cache, key);
+            if (list == null) {
+                list = delegate.query(ms, parameterObject, rowBounds, resultHandler, key, boundSql);
+                tcm.putObject(cache, key, list); // issue #578 and #116
+            }
+            return list;
+        }
+    }
+    return delegate.query(ms, parameterObject, rowBounds, resultHandler, key, boundSql);
+}
+```
+
+- 清空二级缓存的方法
+
+配置了 flushCache = true
+
+```java
+private void flushCacheIfRequired(MappedStatement ms) {
+    Cache cache = ms.getCache();
+    if (cache != null && ms.isFlushCacheRequired()) {
+        tcm.clear(cache);
+    }
+}
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

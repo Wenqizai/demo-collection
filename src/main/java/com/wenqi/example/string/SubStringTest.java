@@ -9,6 +9,10 @@ import org.apache.commons.lang3.StringUtils;
  */
 public class SubStringTest {
     public static void main(String[] args) {
+        subStr("1234");
+    }
+
+    private static void testGetPluCode() {
         System.out.println(getPluCode("12345608"));
         System.out.println(getPluCode("02345600"));
         System.out.println(getPluCode("20300678"));
@@ -17,6 +21,14 @@ public class SubStringTest {
         System.out.println(getPluCode("20019068"));
         System.out.println(getPluCode("20000008"));
         System.out.println(getPluCode("00000010"));
+    }
+
+
+    public static void subStr(String str) {
+        System.out.println(str.length());
+        if (str.length() > 3) {
+            System.out.println(str.substring(0, 3));
+        }
     }
 
     public static String getPluCode(String skuCode) {

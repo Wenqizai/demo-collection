@@ -12,6 +12,10 @@ MyBatis都是基于`SqlSessionFactory`实例为核心。`SqlSessionFactory`的�
 2. SqlSession线程不安全，注意共享session问题，最佳实践每个方法请求时开启一个SqlSession，方法结束就关闭；
 3. 每个数据库对应一个 SqlSessionFactory 实例；
 
+> 一条 sql 执行流程
+
+Main -> openSession -> getMapper -> Mapper -> MapperProxy -> MapperMethod -> SqlSession -> executor -> create PrepareStatement -> getConnection -> PrepareStatementHandler.parameterize -> PreparedStatement.execute -> ResultSetHandler.handleResultSets （jdbc 返回的 ResultSet 类型处理） -> ResultHandler.handleResult (返回结果类型处理) -> Main
+
 ## 架构
 
 - 架构图
@@ -5422,6 +5426,171 @@ private void flushCacheIfRequired(MappedStatement ms) {
 }
 ```
 
+# 接口层
+
+MyBatis 核心接口层，SqlSession、Mapper、SqlSessionFactory。其中 MyBatis 提供 SqlSession 和 SqlSessionFactory 的接口实现，而 Mapper 则由用户定义与实现接口，并在MyBatis初始化过程中以动态代理的方式创建。
+
+## SqlSession
+
+SqlSession 顾名思义是与数据库交互的 Session 抽象。如下图，默认实现是 DefaultSqlSession，并由 DefaultSqlSessionFactory 创建。
+
+==注意：SqlSession 是被 Mapper 调用的，上一级的具体对象是 MapperMethod。==
+
+参看方法：org.apache.ibatis.binding.MapperMethod#execute
+
+![SqlSession相关接口](./material\MyBatis\SqlSession相关接口.png)
+
+- 接口定义
+
+```java
+public interface SqlSession extends Closeable {
+    <T> T selectOne(String var1);
+
+    <T> T selectOne(String var1, Object var2);
+
+    <E> List<E> selectList(String var1);
+
+    <E> List<E> selectList(String var1, Object var2);
+
+    <E> List<E> selectList(String var1, Object var2, RowBounds var3);
+
+    <K, V> Map<K, V> selectMap(String var1, String var2);
+
+    <K, V> Map<K, V> selectMap(String var1, Object var2, String var3);
+
+    <K, V> Map<K, V> selectMap(String var1, Object var2, String var3, RowBounds var4);
+
+    <T> Cursor<T> selectCursor(String var1);
+
+    <T> Cursor<T> selectCursor(String var1, Object var2);
+
+    <T> Cursor<T> selectCursor(String var1, Object var2, RowBounds var3);
+
+    void select(String var1, Object var2, ResultHandler var3);
+
+    void select(String var1, ResultHandler var2);
+
+    void select(String var1, Object var2, RowBounds var3, ResultHandler var4);
+
+    int insert(String var1);
+
+    int insert(String var1, Object var2);
+
+    int update(String var1);
+
+    int update(String var1, Object var2);
+
+    int delete(String var1);
+
+    int delete(String var1, Object var2);
+
+    void commit();
+
+    void commit(boolean var1);
+
+    void rollback();
+
+    void rollback(boolean var1);
+
+    List<BatchResult> flushStatements();
+
+    void close();
+
+    void clearCache();
+
+    Configuration getConfiguration();
+
+    <T> T getMapper(Class<T> var1);
+
+    Connection getConnection();
+}
+```
+
+### DefaultSqlSession
+
+DefaultSqlSession：SqlSession 的默认实现，封装与数据库交互的所有材料。
+
+- 相关属性
+
+```java
+public class DefaultSqlSession implements SqlSession {
+	// 配置对象
+    private final Configuration configuration;
+    // 负责执行的 Executor，用了策略模式
+    private final Executor executor;
+	// 是否自动提交事务
+    private final boolean autoCommit;
+    // 缓存中是否允许有脏数据，默认false
+    private boolean dirty;
+    // 这里记录用户打开的游标对象，为了防止用户忘记关闭，这里会统一在 close 方法调用时关闭
+    private List<Cursor<?>> cursorList;
+}
+```
+
+- 核心接口
+
+```java
+// 只返回一条记录，如果有多条则报错
+public <T> T selectOne(String statement);
+
+// 返回多条记录
+public <E> List<E> selectList(String statement);
+
+// 返回 Map，如果不指定 @MapKey 则演变成调用 selectOne
+// 参考： org.apache.ibatis.binding.MapperMethod#execute
+public <K, V> Map<K, V> selectMap(String statement, String mapKey);
+```
+
+> 关于 **dirty** 字段
+
+dirty：指定当前缓存中是否有脏数据，来指定是否提交/回滚当前事务。MyBatis 每次调用 SqlSession.commit 时并不是实际事务的提交（**多次合并成一次事务提交**），而是有状态函数来决定，如下所示：
+
+- isCommitOrRollbackRequired 方法返回 true 时，当前 Session 的事务需要提交。
+
+​	1. `force == true`：强制事务提交
+
+​	2. `!autoCommit && dirty`：设置手动提交事务且缓存有脏数据时
+
+- 影响 dirty 地方：
+  - 默认创建为 false
+  - 执行 insert，delete，update 方法之后，设置 dirty = true
+  - commit/rollback 之后，设置 dirty = false
+
+这里 `dirty = true` 不一定有脏数据，有概率。commit 后才会清理本地缓存和提交事务
+
+```java
+// 该函数返回值是下面函数的 required
+// org.apache.ibatis.session.defaults.DefaultSqlSession#isCommitOrRollbackRequired
+private boolean isCommitOrRollbackRequired(boolean force) {
+    return (!autoCommit && dirty) || force;
+}  
+
+// org.apache.ibatis.executor.Executor#commit
+public void commit(boolean required) throws SQLException {
+    if (closed) {
+        throw new ExecutorException("Cannot commit, transaction is already closed");
+    }
+    clearLocalCache();
+    flushStatements();
+    if (required) {
+        transaction.commit();
+    }
+}
+
+// org.apache.ibatis.executor.Executor#rollback
+public void rollback(boolean required) throws SQLException {
+    if (!closed) {
+        try {
+            clearLocalCache();
+            flushStatements(true);
+        } finally {
+            if (required) {
+                transaction.rollback();
+            }
+        }
+    }
+}
+```
 
 
 
@@ -5431,6 +5600,63 @@ private void flushCacheIfRequired(MappedStatement ms) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Main -> openSession -> getMapper -> Mapper -> MapperProxy -> MapperMethod -> SqlSession -> executor -> create PrepareStatement -> getConnection -> PrepareStatementHandler.parameterize -> PreparedStatement.execute -> ResultSetHandler.handleResultSets （jdbc 返回的 ResultSet 类型处理） -> ResultHandler.handleResult (返回结果类型处理) -> Main
+
+
+
+
+
+
+
+
+
+
+
+
+
+Mapper -> MapperProxy -> MapperMethod -> SqlSession -> Executor -> jdbc
 
 
 

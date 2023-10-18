@@ -5592,23 +5592,109 @@ public void rollback(boolean required) throws SQLException {
 }
 ```
 
+## SqlSessionFactory
 
+SqlSessionFactory 就是用来创建 SqlSession 的，默认实现 DefaultSqlSessionFactory。
 
+我们可以从 SqlSessionFactory 的接口中可以看到，创建 SqlSession 时可以传入一些自定义属性。
 
+```java
+public interface SqlSessionFactory {
 
+  SqlSession openSession();
 
+  SqlSession openSession(boolean autoCommit);
 
+  SqlSession openSession(Connection connection);
 
+  SqlSession openSession(TransactionIsolationLevel level);
 
+  SqlSession openSession(ExecutorType execType);
 
+  SqlSession openSession(ExecutorType execType, boolean autoCommit);
 
+  SqlSession openSession(ExecutorType execType, TransactionIsolationLevel level);
 
+  SqlSession openSession(ExecutorType execType, Connection connection);
 
+  Configuration getConfiguration();
 
+}
+```
 
+### DefaultSqlSessionFactory
 
+DefaultSqlSessionFactory 创建 SqlSession 有两种方式。一种从数据源获取 `openSessionFromDataSource`，另一种从连接中获取 `openSessionFromConnection` （传参传入 Connection）。
 
+```java
+public SqlSession openSession(boolean autoCommit) {
+    return openSessionFromDataSource(configuration.getDefaultExecutorType(), null, autoCommit);
+}
 
+public SqlSession openSession(Connection connection) {
+    return openSessionFromConnection(configuration.getDefaultExecutorType(), connection);
+}
+```
+
+> openSessionFromDataSource
+
+数据源中获取，即 DataSource。
+
+```java
+// 数据源获取啥东东都要新创建
+private SqlSession openSessionFromDataSource(ExecutorType execType, TransactionIsolationLevel level, boolean autoCommit) {
+    Transaction tx = null;
+    try {
+        // 获取环境配置对象
+        final Environment environment = configuration.getEnvironment();
+        // 获取 transactionFactory 对象
+        final TransactionFactory transactionFactory = getTransactionFactoryFromEnvironment(environment);
+        // 创建 Transaction 对象
+        tx = transactionFactory.newTransaction(environment.getDataSource(), level, autoCommit);
+        // 创建 Executor 对象
+        final Executor executor = configuration.newExecutor(tx, execType);
+        // 创建 SqlSession 对象
+        return new DefaultSqlSession(configuration, executor, autoCommit);
+    } catch (Exception e) {
+        closeTransaction(tx); // may have fetched a connection so lets call close()
+        throw ExceptionFactory.wrapException("Error opening session.  Cause: " + e, e);
+    } finally {
+        ErrorContext.instance().reset();
+    }
+}
+```
+
+> openSessionFromConnection
+
+```java
+private SqlSession openSessionFromConnection(ExecutorType execType, Connection connection) {
+    try {
+        boolean autoCommit;
+        try {
+            // 从当前 Connection 中获取事务自动提交方式
+            autoCommit = connection.getAutoCommit();
+        } catch (SQLException e) {
+            // Failover to true, as most poor drivers
+            // or databases won't support transactions
+            autoCommit = true;
+        }
+        // 获取环境配置对象
+        final Environment environment = configuration.getEnvironment();
+        // 获取 transactionFactory 对象
+        final TransactionFactory transactionFactory = getTransactionFactoryFromEnvironment(environment);
+        // 传入 connection 创建 Transaction 对象，当调用 getConnection 时就不用创建 Connection 啦
+        final Transaction tx = transactionFactory.newTransaction(connection);
+        // 创建 Executor 对象
+        final Executor executor = configuration.newExecutor(tx, execType);
+        // 创建 SqlSession 对象
+        return new DefaultSqlSession(configuration, executor, autoCommit);
+    } catch (Exception e) {
+        throw ExceptionFactory.wrapException("Error opening session.  Cause: " + e, e);
+    } finally {
+        ErrorContext.instance().reset();
+    }
+}
+```
 
 
 
@@ -5656,7 +5742,25 @@ Main -> openSession -> getMapper -> Mapper -> MapperProxy -> MapperMethod -> Sql
 
 
 
-Mapper -> MapperProxy -> MapperMethod -> SqlSession -> Executor -> jdbc
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

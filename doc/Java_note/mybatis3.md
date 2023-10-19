@@ -5696,16 +5696,74 @@ private SqlSession openSessionFromConnection(ExecutorType execType, Connection c
 }
 ```
 
+## SqlSessionManager
 
+由如下类图可知，SqlSessionManager 组合了 SqlSessionFactory 和 SqlSession。
 
+SqlSessionManager 主要用来管理 SqlSession 的，包括 SqlSession 的生命周期。 
 
+![SqlSession相关接口](./material\MyBatis\SqlSession相关接口.png)
 
+从 SqlSessionManager 的构造方法可以看出，SqlSessionManager 具备 SqlSessionFactory 创建 SqlSession 的能力；同时动态代理了 SqlSession，可以直接操作数据库，并对操作方法进行增强。
 
+```java
+// 构造方法私有化，通过 newInstance 创建
+private SqlSessionManager(SqlSessionFactory sqlSessionFactory) {
+    this.sqlSessionFactory = sqlSessionFactory;
+    this.sqlSessionProxy = (SqlSession) Proxy.newProxyInstance(
+        SqlSessionFactory.class.getClassLoader(),
+        new Class[]{SqlSession.class},
+        new SqlSessionInterceptor());
+}
 
+public static SqlSessionManager newInstance(Reader reader) {
+    return new SqlSessionManager(new SqlSessionFactoryBuilder().build(reader, null, null));
+}
 
+public static SqlSessionManager newInstance(SqlSessionFactory sqlSessionFactory) {
+    return new SqlSessionManager(sqlSessionFactory);
+}
+```
 
+- 管理线程的 Session
 
+使用 SqlSessionManager 需要调用 startManagedSession 方法，否则每次都会创建一个新的 SqlSession。
 
+```java
+private final ThreadLocal<SqlSession> localSqlSession = new ThreadLocal<>();
+
+public void startManagedSession(ExecutorType execType, Connection connection) {
+    this.localSqlSession.set(openSession(execType, connection));
+}
+```
+
+- 增强方法
+
+```java
+@Override
+public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+    final SqlSession sqlSession = SqlSessionManager.this.localSqlSession.get();
+    if (sqlSession != null) {
+        try {
+            return method.invoke(sqlSession, args);
+        } catch (Throwable t) {
+            throw ExceptionUtil.unwrapThrowable(t);
+        }
+    } else {
+        try (SqlSession autoSqlSession = openSession()) {
+            try {
+                final Object result = method.invoke(autoSqlSession, args);
+                autoSqlSession.commit();
+                return result;
+            } catch (Throwable t) {
+                autoSqlSession.rollback();
+                throw ExceptionUtil.unwrapThrowable(t);
+            }
+        }
+    }
+}
+}
+```
 
 
 

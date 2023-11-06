@@ -11,4 +11,11 @@ public class OrderMessage {
 
     private Object  orderContent;
 
+    public Object getOrderContent() {
+        return orderContent;
+    }
+
+    public void setOrderContent(Object orderContent) {
+        this.orderContent = orderContent;
+    }
 }

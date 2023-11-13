@@ -1,4 +1,4 @@
-package com.wenqi.string;
+package com.wenqi.example.string;
 
 import org.apache.commons.lang3.StringUtils;
 

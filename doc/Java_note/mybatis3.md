@@ -5765,17 +5765,237 @@ public Object invoke(Object proxy, Method method, Object[] args) throws Throwabl
 }
 ```
 
+# 高级主题
 
+## 插件 Interceptor
 
+MyBatis 可以通过拦截器来改变 MyBatis 执行过程中的一些行为，比如执行前拦截 SQL，SQL 执行后拦截结果集, SQL 重写，安全性检查等等。
 
+### Demo
 
+> 如何使用拦截器？
 
+1. 实现接口： `org.apache.ibatis.plugin.Interceptor`
 
+```java
+public interface Interceptor {
+	// 拦截方法
+    Object intercept(Invocation invocation) throws Throwable;
 
+    // 动态代理：包装目标对象 target，相当于传入 target 后返回一个功能增强的对象
+    default Object plugin(Object target) {
+        return Plugin.wrap(target, this);
+    }
 
+    // 设置属性，可通过配置 mybatis-config.xml 文件注入指定的属性
+    default void setProperties(Properties properties) {
+        // NOP
+    }
 
+}
+```
 
+2. 自定义实现类使用注解拦截指定方法
 
+```java
+@Intercepts({
+    @Signature(type = Map.class, method = "get", args = {Object.class})
+})
+public static class AlwaysMapPlugin implements Interceptor {
+    @Override
+    public Object intercept(Invocation invocation) {
+        return "Always";
+    }
+}
+
+@Documented
+@Retention(RetentionPolicy.RUNTIME)
+@Target(ElementType.TYPE)
+public @interface Intercepts {
+  /**
+   * Returns method signatures to intercept.
+   *
+   * @return method signatures
+   */
+    Signature[] value();
+}
+
+@Documented
+@Retention(RetentionPolicy.RUNTIME)
+@Target({})
+public @interface Signature {
+  /**
+   * Returns the java type.
+   *
+   * @return the java type
+   */
+    Class<?> type();
+
+  /**
+   * Returns the method name.
+   *
+   * @return the method name
+   */
+    String method();
+
+  /**
+   * Returns java types for method argument.
+   * @return java types for method argument
+   */
+    Class<?>[] args();
+}
+```
+
+3. 配置 mybatis-config.xml，注入相关属性
+
+```xml
+<plugins>
+    <plugin interceptor="org.apache.ibatis.builder.ExamplePlugin">
+        <property name="pluginProperty" value="100"/>
+    </plugin>
+</plugins>
+```
+
+### 实现原理
+
+> 1. MyBatis 在启动过程中，将所有的插件加入到拦截器中
+
+- executer 拦截
+
+`org.apache.ibatis.session.Configuration#newExecutor(org.apache.ibatis.transaction.Transaction, org.apache.ibatis.session.ExecutorType)`
+
+从 `interceptorChain.pluginAll()` 方法中可以知道，executor 是一个加入各种插件的增强对象。
+
+```java
+public Executor newExecutor(Transaction transaction, ExecutorType executorType) {
+    executorType = executorType == null ? defaultExecutorType : executorType;
+    executorType = executorType == null ? ExecutorType.SIMPLE : executorType;
+    Executor executor;
+    if (ExecutorType.BATCH == executorType) {
+        executor = new BatchExecutor(this, transaction);
+    } else if (ExecutorType.REUSE == executorType) {
+        executor = new ReuseExecutor(this, transaction);
+    } else {
+        executor = new SimpleExecutor(this, transaction);
+    }
+    if (cacheEnabled) {
+        executor = new CachingExecutor(executor);
+    }
+    executor = (Executor) interceptorChain.pluginAll(executor);
+    return executor;
+}
+```
+
+- ParameterHandler 的拦截
+
+org.apache.ibatis.session.Configuration#newParameterHandler
+
+```java
+public ParameterHandler newParameterHandler(MappedStatement mappedStatement, Object parameterObject, BoundSql boundSql) {
+    ParameterHandler parameterHandler = mappedStatement.getLang().createParameterHandler(mappedStatement, parameterObject, boundSql);
+    parameterHandler = (ParameterHandler) interceptorChain.pluginAll(parameterHandler);
+    return parameterHandler;
+}
+```
+
+- ResultSetHandler 的拦截
+
+org.apache.ibatis.session.Configuration#newResultSetHandler
+
+```java
+public ResultSetHandler newResultSetHandler(Executor executor, MappedStatement mappedStatement, RowBounds rowBounds, ParameterHandler parameterHandler,
+                                            ResultHandler resultHandler, BoundSql boundSql) {
+    ResultSetHandler resultSetHandler = new DefaultResultSetHandler(executor, mappedStatement, parameterHandler, resultHandler, boundSql, rowBounds);
+    resultSetHandler = (ResultSetHandler) interceptorChain.pluginAll(resultSetHandler);
+    return resultSetHandler;
+}
+```
+
+- 拦截链
+
+MyBatis 在启动过程中填充 interceptors，并由一个个的 Interceptor 组成了一个责任链。`pluginAll()` 方法用动态代理的模式将每一个 Interceptor 组织起来。
+
+```java
+public class InterceptorChain {
+
+  private final List<Interceptor> interceptors = new ArrayList<>();
+
+  public Object pluginAll(Object target) {
+    for (Interceptor interceptor : interceptors) {
+      target = interceptor.plugin(target);
+    }
+    return target;
+  }
+
+  public void addInterceptor(Interceptor interceptor) {
+    interceptors.add(interceptor);
+  }
+
+  public List<Interceptor> getInterceptors() {
+    return Collections.unmodifiableList(interceptors);
+  }
+
+}
+```
+
+> 2. Plugin 工作原理
+
+我们从 Interceptor 定义的方法可以知道，返回的增强对象是通过调用  `Plugin.wrap(target, this)` 方法。
+
+```java
+// target： 要包装的对象
+// this: 指代自定义的 Interceptor，里面包含元数据定义了 @Intercepts 和拦截的实现方法 intercept。
+default Object plugin(Object target) {
+    return Plugin.wrap(target, this);
+}
+```
+
+- Plugin.wrap()
+
+org.apache.ibatis.plugin.Plugin#wrap
+
+```java
+public static Object wrap(Object target, Interceptor interceptor) {
+    // 需要拦截的特征方法，@Intercepts 中定义，并维护拦截特征集合 signatureMap
+    // key: 拦截的类	value：拦截的方法
+    Map<Class<?>, Set<Method>> signatureMap = getSignatureMap(interceptor);
+    // 获取 target 方法的所有接口, 如果匹配到 signatureMap 则创建动态代理对象
+    Class<?> type = target.getClass();
+    Class<?>[] interfaces = getAllInterfaces(type, signatureMap);
+    // 创建动态代理对象
+    if (interfaces.length > 0) {
+        return Proxy.newProxyInstance(
+            type.getClassLoader(),
+            interfaces,
+            new Plugin(target, interceptor, signatureMap));
+    }
+    return target;
+}
+```
+
+- 代理对象的执行
+
+org.apache.ibatis.plugin.Plugin#invoke
+
+我们知道动态代理对象执行时，会调用 method.invoke() 方法。该方法是用来拦截目标方法的执行，达到增强的目的，增强的逻辑就定义在 interceptor.intercept() 方法中。
+
+```java
+public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+    try {
+       	// 从 signatureMap 中获取需要拦截的方法 
+        Set<Method> methods = signatureMap.get(method.getDeclaringClass());
+        // 比较正在执行的方法与如果执行的方法符合需要拦截的方法
+        if (methods != null && methods.contains(method)) {
+            // 执行 interceptor.intercept 拦截的方法。
+            return interceptor.intercept(new Invocation(target, method, args));
+        }
+        // 执行方法不符合需要拦截的方法，则直接放行
+        return method.invoke(target, args);
+    } catch (Exception e) {
+        throw ExceptionUtil.unwrapThrowable(e);
+    }
+}
+```
 
 
 

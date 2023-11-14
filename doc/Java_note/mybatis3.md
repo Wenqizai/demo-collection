@@ -5997,11 +5997,50 @@ public Object invoke(Object proxy, Method method, Object[] args) throws Throwabl
 }
 ```
 
+## MyBatis集成Spring
 
+MyBatis 与 Spring 集成主要使用了 mybatis-spring.xxx.jar 包。
 
+- **SpringManagedTransaction**
 
+Spring 管理事务的地方
 
+```java
+public class SpringManagedTransaction implements Transaction {
+}
+```
 
+- **SqlSessionTemplate**
+
+SqlSessionTemplate 是 MyBatis-Spring 的核心，它实现了 SqlSession 接口，在 MyBatis 与 Spring 集成开发时，用来代替 MyBatis 中的 DefaultSqlSession 的功能，所以可以通过 SqlSessionTemplate 对象完成指定的数据库操作。SqlSessionTemplate 是线程安全的，可以在 DAO （Data Access Object，数据访问对象）之间共享使用，其底层封装了 Spring 管理的 SqlSession 对象。
+
+- **MapperFactoryBean**
+
+负责将Mapper接口注入到 Service 层的 Bean 中。
+
+MapperFactoryBean 中使用 mapperInterface 字段（Class类型）记录了 Mapper 接口的类型，并在checkDaoConfig() 方法中完成加载。
+
+```xml
+<!--配置id为userMapper的Bean-->
+<bean id="userMapper"class="org.mybatis.spring.mapper.MapperFactoryBean">
+    <!--配置Mapper接口-->
+    <property name="mapperInterface"value="com.xjm.mapper.UserMapper"/>
+    <!--配置SqlSessionFactory,用于创建底层的SqlSessionTemplate-->
+    <property name="sqlSessionFactory"ref="sqlSessionFactory"/>
+</bean>
+```
+
+- **MapperScannerConfigurer**
+
+负责扫描相关配置，并加入到 MyBatis 中。
+
+MapperScannerConfigurer 实现 `BeanDefinitionRegistryPostProcessor` 接口，在 Spring 启动过程中会调用 `postProcessBeanDefinitionRegistry()` 方法，完成相关配置的扫描和链接
+
+```java
+public class MapperScannerConfigurer
+    implements BeanDefinitionRegistryPostProcessor, InitializingBean, ApplicationContextAware, BeanNameAware {
+}
+```
 
 
 

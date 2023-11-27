@@ -21,16 +21,22 @@ public class Lesson7_2 {
     /**
      * 密码
      */
-    private static final String HIT_PASSWORD = "aaee";
+    private static final String HIT_PASSWORD = "aeee";
 
     private static final String DICT = "abcde";
 
     private static int tryCount = 0;
 
+    private static boolean foundPassword = false;
+
     /**
      * 重字典中选出4位组合
      */
     public static void guessPassword(String choosePasswords) {
+        if (foundPassword) {
+            return;
+        }
+
         if (choosePasswords.length() == 4) {
             tryPassword(choosePasswords, "");
             return;
@@ -46,9 +52,14 @@ public class Lesson7_2 {
      * 全排序对比
      */
     public static void tryPassword(String rest, String result) {
+        if (foundPassword) {
+            return;
+        }
+
         if (result.length() == 4) {
             if (Objects.equals(result, HIT_PASSWORD)) {
                 System.out.println("hit in : " + ++tryCount);
+                foundPassword = true;
                 return;
             }
             System.out.println("tryCount: " + ++tryCount + " result: " + result);
@@ -57,9 +68,7 @@ public class Lesson7_2 {
 
         for (int i = 0; i < rest.length(); i++) {
             String newResult = result + rest.charAt(i);
-            StringBuilder sb = new StringBuilder(rest);
-            sb.deleteCharAt(i);
-            tryPassword(sb.toString(), newResult);
+            tryPassword(rest.substring(i + 1), newResult);
         }
 
     }

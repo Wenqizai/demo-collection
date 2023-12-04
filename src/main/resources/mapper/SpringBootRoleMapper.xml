@@ -109,4 +109,10 @@
             </choose>
         </where>
     </select>
+
+    <update id="batchUpdate">
+        <foreach collection="list" separator=";" item="item">
+            UPDATE `role` SET `note` = 'Multi Thread Transaction-a1' WHERE `role_name` = #{item,jdbcType=VARCHAR}
+        </foreach>
+    </update>
 </mapper>

@@ -31,4 +31,6 @@ public interface SpringBootRoleMapper {
     List<Role> selectByIds(@Param("idsList") List<Long> idsList);
 
     List<Role> selectByCondition(RoleConditionDto roleConditionDto);
+
+    Integer batchUpdate(@Param("list") List<String> list);
 }

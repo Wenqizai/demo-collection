@@ -113,7 +113,7 @@ public class GeneratorTest {
                             .enableBaseColumnList()
                             .cache(MyMapperCache.class)
                             .formatMapperFileName("%sMapper")
-                            .formatXmlFileName("%sXml")
+                            .formatXmlFileName("%sMapper")
                             .build();
                 })
                 .execute();

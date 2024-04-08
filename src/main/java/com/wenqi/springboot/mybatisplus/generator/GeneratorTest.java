@@ -25,18 +25,18 @@ import java.util.Map;
  * @date 2024/4/7
  */
 public class GeneratorTest {
-    //    private static final String url = "jdbc:mysql://10.0.88.8:3306/mbp_test_db?useUnicode=true&characterEncoding=utf-8&useSSL=false&allowMultiQueries=true&rewriteBatchedStatements=true";
-    private static final String url = "jdbc:mysql://192.168.1.116:3306/mbp_test_db?useUnicode=true&characterEncoding=utf-8&useSSL=false&allowMultiQueries=true&rewriteBatchedStatements=true";
+        private static final String url = "jdbc:mysql://10.0.88.8:3306/mbp_test_db?useUnicode=true&characterEncoding=utf-8&useSSL=false&allowMultiQueries=true&rewriteBatchedStatements=true";
+    //private static final String url = "jdbc:mysql://192.168.1.116:3306/mbp_test_db?useUnicode=true&characterEncoding=utf-8&useSSL=false&allowMultiQueries=true&rewriteBatchedStatements=true";
     private static final String username = "root";
     private static final String password = "root";
-    private static final String finalProjectPath = "./";
+    private static final String finalProjectPath = System.getProperty("user.dir");
 
 
     public static void main(String[] args) {
-        testInjectionConfig();
+        testGenerator();
     }
 
-    public void testGenerator() {
+    public static void testGenerator() {
         FastAutoGenerator.create(url, username, password)
                 .globalConfig(builder -> {
                     builder.author("abc") // 设置作者
@@ -46,39 +46,45 @@ public class GeneratorTest {
                             .outputDir(finalProjectPath + "/src/main/java"); // 指定输出目录
                 })
                 .packageConfig(builder -> {
-                    builder.parent("com.baomidou.mybatisplus.samples") // 设置父包名
-                            .moduleName("test") // 设置父包模块名
+                    builder.parent("com.wenqi.springboot.mybatisplus") // 设置父包名
+                            .moduleName("generator") // 设置父包模块名
                             .entity("model.entity") //设置entity包名
                             .other("model.dto") // 设置dto包名
                             .pathInfo(Collections.singletonMap(OutputFile.xml, finalProjectPath + "/src/main/resources/mapper")); // 设置mapperXml生成路径
 
                 })
-                .injectionConfig(consumer -> {
-                    Map<String, String> customFile = new HashMap<>();
-                    // DTO
-                    customFile.put("DTO.java", "/templates/entityDTO.java.ftl");
-                    consumer.customFile(customFile);
-                })
+                //.injectionConfig(consumer -> {
+                //    Map<String, String> customFile = new HashMap<>();
+                //    // DTO
+                //    customFile.put("DTO.java", "/templates/entityDTO.java.ftl");
+                //    consumer.customFile(customFile);
+                //})
                 .strategyConfig(builder -> {
                     builder
+                            .addTablePrefix("t_")
+                            .addInclude("t_simple")
+                            .build();
+
+
+                    builder
                             .controllerBuilder()
-                            .superClass(BaseController.class)
+                            //.superClass(BaseController.class)
                             .enableHyphenStyle()
                             .enableRestStyle()
-                            .formatFileName("%sAction")
+                            .formatFileName("%sController")
                             .build();
 
                     builder
                             .serviceBuilder()
-                            .superServiceClass(BaseService.class)
-                            .superServiceImplClass(BaseServiceImpl.class)
+                            //.superServiceClass(BaseService.class)
+                            //.superServiceImplClass(BaseServiceImpl.class)
                             .formatServiceFileName("%sService")
-                            .formatServiceImplFileName("%sServiceImp")
+                            .formatServiceImplFileName("%sServiceImpl")
                             .build();
 
                     builder
                             .entityBuilder()
-                            .superClass(BaseEntity.class)
+                            //.superClass(BaseEntity.class)
                             .disableSerialVersionUID()
                             .enableChainModel()
                             .enableLombok()
@@ -106,10 +112,11 @@ public class GeneratorTest {
                             .enableBaseResultMap()
                             .enableBaseColumnList()
                             .cache(MyMapperCache.class)
-                            .formatMapperFileName("%sDao")
+                            .formatMapperFileName("%sMapper")
                             .formatXmlFileName("%sXml")
                             .build();
-                });
+                })
+                .execute();
 
     }
 

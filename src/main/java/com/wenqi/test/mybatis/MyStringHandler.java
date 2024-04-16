@@ -4,7 +4,8 @@ import org.apache.ibatis.type.JdbcType;
 import org.apache.ibatis.type.MappedJdbcTypes;
 import org.apache.ibatis.type.MappedTypes;
 import org.apache.ibatis.type.TypeHandler;
-import org.apache.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.sql.CallableStatement;
 import java.sql.PreparedStatement;
@@ -18,7 +19,7 @@ import java.sql.SQLException;
 @MappedTypes({String.class})
 @MappedJdbcTypes(JdbcType.VARCHAR)
 public class MyStringHandler implements TypeHandler<String> {
-  private Logger log = Logger.getLogger(MyStringHandler.class);
+  private Logger log = LoggerFactory.getLogger(MyStringHandler.class);
 
   @Override
   public String getResult(ResultSet rs, String colName) throws SQLException {

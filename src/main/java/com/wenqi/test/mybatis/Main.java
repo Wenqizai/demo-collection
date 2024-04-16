@@ -23,7 +23,7 @@ public class Main {
   public static void main(String[] args) {
     // 加了这一句log4j才生效
     //BasicConfigurator.configure();
-    //PropertyConfigurator.configure("src/main/resources/mybatis/log4j.properties");
+    //PropertyConfigurator.configure("src/main/resources/mybatis/log4j.properties.bk");
 
     String resource = "mybatis/mybatis-config.xml";
     InputStream inputStream = null;

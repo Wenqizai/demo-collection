@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE configuration
+        PUBLIC "-//mybatis.org//DTD Config 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-config.dtd">
+<configuration>
+    <settings>
+        <setting name="lazyLoadingEnabled" value="true"/>
+        <!-- <setting name="aggressiveLazyLoading" value="false"/> -->
+        <setting name="logImpl" value="Log4j"/>
+    </settings>
+
+    <typeAliases>
+        <typeAlias alias="role" type="com.wenqi.test.mybatis.Role"/>
+    </typeAliases>
+
+    <typeHandlers>
+        <typeHandler jdbcType="VARCHAR" javaType="string" handler="com.wenqi.test.mybatis.MyStringHandler"/>
+    </typeHandlers>
+
+    <!-- 定义数据库的信息，默认使用development数据库构建环境 -->
+    <environments default="development">
+        <environment id="development">
+            <transactionManager type="JDBC"/>
+            <dataSource type="POOLED">
+                <property name="driver" value="com.mysql.cj.jdbc.Driver"/>
+                <property name="url" value="jdbc:mysql://192.168.8.116:3306/test_db"/>
+                <property name="username" value="root"/>
+                <property name="password" value="root"/>
+            </dataSource>
+        </environment>
+    </environments>
+
+    <!-- 未指定property属性时， databaseId通过方法DatabaseMetaData#getDatabaseProductName()获取 -->
+    <!-- 主要是通过Connection的metadata中获取 -->
+    <!-- 指定属性时， databaseId上述方法获取到，通常情况下这些字符串都非常长，而且相同产品的不同版本会返回不同的值 -->
+    <!-- 这时，我们可以通过设置属性别名来使其变短 -->
+    <!-- 如果属性name不匹配时，databaseId返回null -->
+    <databaseIdProvider type="DB_VENDOR">
+        <property name="MySQL" value="mysql"/>
+        <property name="SQL Server" value="sqlserver"/>
+        <property name="DB2" value="db2"/>
+        <property name="Oracle" value="oracle" />
+    </databaseIdProvider>
+
+    <!-- 定义映射器 -->
+    <mappers>
+        <mapper resource="mybatis/RoleMapper.xml"/>
+        <mapper resource="mybatis/UserMapper.xml"/>
+<!--        <package name="com.wenqi.test.mybatis"/>-->
+    </mappers>
+
+</configuration>

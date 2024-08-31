@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.wenqi.springboot.mapper.SpringBootRoleMapper">
+    <resultMap type="com.wenqi.springboot.pojo.model.Role" id="roleMap">
+        <id column="id" property="id" javaType="long" jdbcType="BIGINT"/>
+        <result column="role_name" property="roleName" javaType="string" jdbcType="VARCHAR"/>
+        <result column="note" property="note" javaType="string" jdbcType="VARCHAR"/>
+    </resultMap>
+
+    <select id="getRole" parameterType="long" resultMap="roleMap">
+        select id, role_name as roleName, note
+        from role
+        where id = #{id,jdbcType=BIGINT}
+    </select>
+
+    <select id="findRole" parameterType="long" resultMap="roleMap">
+        select id, role_name, note
+        from role
+        where role_name like CONCAT('%',
+                                    #{roleName, jdbcType=VARCHAR},
+                                    '%')
+    </select>
+
+    <insert id="insertRole" parameterType="com.wenqi.springboot.pojo.model.Role">
+        <selectKey keyProperty="id" order="AFTER" resultType="java.lang.Long">
+            SELECT LAST_INSERT_ID()
+        </selectKey>
+        insert into role (role_name, note) value (#{roleName}, #{note})
+    </insert>
+
+    <delete id="deleteRole" parameterType="long">
+        delete
+        from role
+        where id = #{id}
+    </delete>
+
+    <sql id="someCondition">
+        and role_name = ''
+    </sql>
+
+    <select id="selectRoleById" resultType="com.wenqi.springboot.pojo.model.Role">
+        select *
+        from role where id in
+        <foreach collection="list" open="(" close=")" separator="," item="item">
+            #{item,jdbcType=BIGINT}
+        </foreach>
+    </select>
+
+    <select id="selectByRole" resultType="com.wenqi.springboot.pojo.model.Role">
+        select *
+        from role
+        <where>
+            <if test="id != null">
+                AND id = #{id,javaType=long}
+            </if>
+            <if test="roleName != null and roleName != ''">
+                AND role_name like concat('%', #{roleName,jdbcType=VARCHAR}, '%')
+            </if>
+            <if test="note != null and note != ''">
+                ${note}
+            </if>
+        </where>
+    </select>
+
+    <update id="updateByRole">
+        update role
+        <set>
+            <if test="roleName != null and roleName != ''">
+                role_name = #{roleName,jdbcType=VARCHAR},
+            </if>
+            <if test="note != null and note != ''">
+                note = #{note,jdbcType=VARCHAR} ,
+            </if>
+        </set>
+        where id = #{id,jdbcType=INTEGER}
+    </update>
+
+    <insert id="batchInsert">
+        insert into role (role_name, note) values
+        <foreach collection="roleList" separator="," item="item">
+            (#{item.roleName,jdbcType=VARCHAR}, #{item.note,jdbcType=VARCHAR})
+        </foreach>
+    </insert>
+
+    <select id="selectByIds" resultType="com.wenqi.springboot.pojo.model.Role">
+        select *
+        from role where id in
+        <foreach collection="idsList" item="item" separator="," open="(" close=")">
+            #{item,jdbcType=BIGINT}
+        </foreach>
+    </select>
+
+    <select id="selectByCondition" resultType="com.wenqi.springboot.pojo.model.Role">
+        select *
+        from role
+        <where>
+            <choose>
+                <when test="noteCondition != null and noteCondition == 1">
+                    and note like '0'
+                </when>
+                <when test="noteCondition != null and noteCondition == 2">
+                    and note like '1'
+                </when>
+                <otherwise>
+                    and note like '张'
+                </otherwise>
+            </choose>
+        </where>
+    </select>
+
+    <update id="batchUpdate">
+        <foreach collection="list" separator=";" item="item">
+            UPDATE `role` SET `note` = 'Multi Thread Transaction-a1' WHERE `role_name` = #{item,jdbcType=VARCHAR}
+        </foreach>
+    </update>
+</mapper>

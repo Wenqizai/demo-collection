@@ -9,6 +9,9 @@ import java.util.concurrent.locks.ReadWriteLock;
  * @date 2024/4/8
  */
 public class MyMapperCache implements Cache {
+    public MyMapperCache(String id) {
+    }
+
     @Override
     public String getId() {
         return "";

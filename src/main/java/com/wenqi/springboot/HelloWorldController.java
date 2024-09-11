@@ -1,5 +1,6 @@
 package com.wenqi.springboot;
 
+import com.alibaba.fastjson.JSON;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -44,4 +45,11 @@ public class HelloWorldController {
         response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
         return "postHelloWorld";
     }
+
+    @PostMapping("/world/msg")
+    public String printHelloWorld(@RequestBody Object object) {
+        System.out.println("收到相关消息：" + JSON.toJSONString(object));
+        return "success";
+    }
+
 }

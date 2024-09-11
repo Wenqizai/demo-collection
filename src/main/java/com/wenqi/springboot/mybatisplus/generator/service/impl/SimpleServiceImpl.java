@@ -14,7 +14,7 @@ import org.springframework.stereotype.Service;
  * @author abc
  * @since 2024-04-08
  */
-@Service
+//@Service
 public class SimpleServiceImpl extends ServiceImpl<SimpleMapper, SimpleEntity> implements SimpleService {
 
 }

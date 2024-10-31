@@ -16,11 +16,9 @@ import javax.persistence.Table;
 public class ${tableClass.shortClassName} implements AInterface {
 
 <#list tableClass.allFields as field>
-
     /**
     * ${field.remark!}
-    */
-    <#if !field.nullable><#if field.fieldName == "id">@Id</#if></#if>
+    */<#if !field.nullable>${"\n    "}<#if field.fieldName == "id">@Id</#if></#if>
     @Column(name = "${field.columnName}")
     private ${field.shortTypeName} ${field.fieldName};
 

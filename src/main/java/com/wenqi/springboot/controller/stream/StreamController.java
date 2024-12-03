@@ -1,6 +1,13 @@
 package com.wenqi.springboot.controller.stream;
 
 import com.alibaba.fastjson.JSON;
+import org.apache.http.client.config.RequestConfig;
+import org.apache.http.client.methods.CloseableHttpResponse;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.entity.mime.MultipartEntityBuilder;
+import org.apache.http.entity.mime.content.FileBody;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.impl.client.HttpClients;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.io.FileSystemResource;
@@ -29,7 +36,8 @@ import java.io.Reader;
 import java.nio.file.Files;
 
 /**
- * 设想使用流式上传文件, 减少内存占用, 现在 demo 还是有 oom 现象, 待解决
+ * 使用流式传输大文件, 减少内存压力
+ * 需注意使用 RestTemplate 需要设置 buffer = false, 否则会内存溢出 (requestFactory.setBufferRequestBody(false);)
  * @author liangwenqi
  * @date 2024/12/2
  */
@@ -81,46 +89,45 @@ public class StreamController {
     }
 
 
-    @PostMapping(value = "/postRequestNotStream")
+    @PostMapping(value = "/postRequestUseHttpClient")
     Integer postRequestNotStream() {
-        // 要上传的文件
-        File file = new File(TEMP_FILE); // 请根据需要修改文件路径
-        // 目标 URL
-        String url = "http://localhost:28080/stream/uploadSave";
-        // 创建 RestTemplate
-        RestTemplate restTemplate = new RestTemplate(new HttpComponentsClientHttpRequestFactory());
+        try (CloseableHttpClient httpclient = HttpClients.createDefault()) {
+            // 要上传的文件
+            File file = new File(TEMP_FILE); // 请根据需要修改文件路径
+            FileBody fileBody = new FileBody(file);
 
-        // 创建请求头
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.MULTIPART_FORM_DATA);
+            // 传输配置
+            RequestConfig requestConfig = RequestConfig.custom().setSocketTimeout(20000).setConnectTimeout(20000).build();
+            org.apache.http.HttpEntity reqEntity = MultipartEntityBuilder.create().addPart("file", fileBody).build();
 
-        // 创建文件资源
-        FileSystemResource fileResource = new FileSystemResource(file);
+            // 目标 URL
+            String url = "http://localhost:18080/stream/uploadSave";
+            HttpPost httppost = new HttpPost(url);
+            httppost.setEntity(reqEntity);
+            httppost.setConfig(requestConfig);
 
-        // 创建 MultiValueMap 来封装文件
-        MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
-        body.add("file", fileResource); // "file" 是服务器端接收文件的字段名
+            CloseableHttpResponse response = httpclient.execute(httppost);
+            LOGGER.info("上传结果: {}", JSON.toJSONString(response));
+        } catch (IOException e) {
+            LOGGER.error("无法上传文件", e);
+        }
 
-        // 创建请求实体
-        HttpEntity<Object> requestEntity = new HttpEntity<>(body, headers);
-
-        // 发送 POST 请求
-        ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.POST, requestEntity, String.class);
-
-        LOGGER.info("上传结果: {}", JSON.toJSONString(response));
         return 1;
     }
 
-    @PostMapping(value = "/postRequestUseStream")
+    @PostMapping(value = "/postRequestUseRestTemplate")
     Integer postRequestUseStream(Reader reader) {
         // 要上传的文件
         File file = new File(TEMP_FILE); // 请根据需要修改文件路径
 
         // 目标 URL
-        String url = "http://localhost:28080/stream/uploadSave";
+        String url = "http://localhost:18080/stream/uploadSave";
 
         // 创建 RestTemplate
-        RestTemplate restTemplate = new RestTemplate(new HttpComponentsClientHttpRequestFactory());
+        HttpComponentsClientHttpRequestFactory requestFactory = new HttpComponentsClientHttpRequestFactory();
+        // 关键参数, 不写入缓存, 直接写入流
+        requestFactory.setBufferRequestBody(false);
+        RestTemplate restTemplate = new RestTemplate(requestFactory);
 
         // 创建请求头
         HttpHeaders headers = new HttpHeaders();

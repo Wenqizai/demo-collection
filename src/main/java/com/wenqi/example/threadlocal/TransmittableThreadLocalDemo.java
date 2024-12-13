@@ -1,5 +1,6 @@
 package com.wenqi.example.threadlocal;
 
+import com.alibaba.ttl.TransmittableThreadLocal;
 import com.alibaba.ttl.TtlRunnable;
 import com.alibaba.ttl.threadpool.TtlExecutors;
 
@@ -7,6 +8,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
+ * 讨论 ThreadLocal 内存泄漏的发生的可能性, 和 TransmittableThreadLocal 使用规范和内存泄漏可能性.
+ * 避免内存泄漏参考 test04, test05
  * @author liangwenqi
  * @date 2024/12/12
  */
@@ -17,8 +20,10 @@ public class TransmittableThreadLocalDemo {
 
     public static void main(String[] args) throws Exception {
 //        test01();
-        test02();
+//        test02();
 //        test03();
+//        test04();
+        test05();
     }
 
     /**
@@ -57,6 +62,7 @@ public class TransmittableThreadLocalDemo {
 
     /**
      * 如果不使用 TtlRunnable, 线程池有线程调用 set(), 没有调用 remove(), 则会内存泄漏
+     * 官方提供的 beforeExecute, afterExecute 回调方法也不能防止内存泄漏
      */
     private static void test02() throws InterruptedException {
         TransmittableThreadLocalExtend<String> ttle = new TransmittableThreadLocalExtend<>();
@@ -116,10 +122,95 @@ public class TransmittableThreadLocalDemo {
     }
 
     /**
-     * 避免内存泄漏的终极办法, 每次执行需要确保 InheritableThreadLocal 是干净的?
+     * 避免内存泄漏的终极办法, 每次执行需要确保子线程的 ThreadLocal 是没有值的, 那么 restore 时也不会有值, 进而避免内存泄漏
+     * <p>
+     * 方法一: 使用官方提供的线程工程包装, 每次 new Thread 都会清理一遍 ThreadLocal 确保线程继承父线程的 ThreadLocal 之前是没有值的
      */
     private static void test04() throws InterruptedException {
+        executorService = Executors.newFixedThreadPool(1, TtlExecutors.getDefaultDisableInheritableThreadFactory());
+        TransmittableThreadLocal<String> ttl = new TransmittableThreadLocal<>();
+
+        executorService.execute(TtlRunnable.get(() -> {
+            System.out.println(Thread.currentThread().getName() + ": 1. child value -> " + ttl.get());
+            ttl.set("value-set-in-child");
+            System.out.println(Thread.currentThread().getName() + ": 2. child value -> " + ttl.get());
+        }));
+
+        threadSleep(1000);
+
+        // 标志位, 证明 TtlRunnable restore 后的子线程的 ThreadLocal 也是空的
+        executorService.execute(() -> {
+            System.out.println(Thread.currentThread().getName() + ": 3. child value -> " + ttl.get());
+        });
+
+        threadSleep(1000);
+
+        // 标志位, 这里证明用 Runnable set() 之后造成内存泄漏
+        executorService.execute(() -> {
+            ttl.set("value-set-in-child - 5");
+            System.out.println(Thread.currentThread().getName() + ": 4. child value -> " + ttl.get());
+        });
+
+        threadSleep(1000);
+
+        executorService.execute(() -> {
+            System.out.println(Thread.currentThread().getName() + ": 5. child value -> " + ttl.get());
+        });
+
+        executorService.shutdown();
     }
+
+    /**
+     * 避免内存泄漏的终极办法, 每次执行需要确保子线程的 ThreadLocal 是没有值的, 那么 restore 时也不会有值, 进而避免内存泄漏
+     * <p>
+     * 方法二: 重写方法 java.lang.InheritableThreadLocal#childValue(java.lang.Object), 确保写入子线程的 ThreadLocal 是空值.
+     */
+    private static void test05() throws InterruptedException {
+        executorService = Executors.newFixedThreadPool(1);
+
+        TransmittableThreadLocal<String> ttl = new TransmittableThreadLocal<String>() {
+            protected String childValue(String parentValue) {
+                //return null;
+                return initialValue();
+            }
+        };
+
+        ttl.set("value-set-in-parent");
+
+        executorService.execute(TtlRunnable.get(() -> {
+            System.out.println(Thread.currentThread().getName() + ": 1. child value -> " + ttl.get());
+            ttl.set("value-set-in-child");
+            System.out.println(Thread.currentThread().getName() + ": 2. child value -> " + ttl.get());
+        }));
+
+        threadSleep(1000);
+
+        // 标志位, 证明 TtlRunnable restore 后的子线程的 ThreadLocal 也是空的
+        executorService.execute(() -> {
+            System.out.println(Thread.currentThread().getName() + ": 3. child value -> " + ttl.get());
+        });
+
+        threadSleep(1000);
+
+        // 标志位, 这里证明用 Runnable set() 之后造成内存泄漏
+        executorService.execute(() -> {
+            ttl.set("value-set-in-child - 5");
+            System.out.println(Thread.currentThread().getName() + ": 4. child value -> " + ttl.get());
+        });
+
+        threadSleep(1000);
+
+        executorService.execute(() -> {
+            System.out.println(Thread.currentThread().getName() + ": 5. child value -> " + ttl.get());
+        });
+
+        executorService.execute(TtlRunnable.get(() -> {
+            System.out.println(Thread.currentThread().getName() + ": 6. child value -> " + ttl.get());
+        }));
+
+        executorService.shutdown();
+    }
+
 
 
     private static void threadSleep(int mills) {

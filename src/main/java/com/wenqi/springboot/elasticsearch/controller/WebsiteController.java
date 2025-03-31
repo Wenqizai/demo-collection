@@ -1,11 +1,18 @@
 package com.wenqi.springboot.elasticsearch.controller;
 
 import com.wenqi.springboot.elasticsearch.model.Blog;
-import com.wenqi.springboot.elasticsearch.model.ScriptUpdateRequest;
-import com.wenqi.springboot.elasticsearch.service.WebsiteService;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.web.bind.annotation.*;
 import com.wenqi.springboot.elasticsearch.model.ResponseResult;
+import com.wenqi.springboot.elasticsearch.model.ScriptUpdateRequest;
+import com.wenqi.springboot.elasticsearch.service.IWebsiteService;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Arrays;
 import java.util.HashSet;
@@ -20,7 +27,7 @@ import java.util.Set;
 public class WebsiteController {
 
     @Autowired
-    private WebsiteService websiteService;
+    private IWebsiteService websiteService;
 
     /**
      * 创建博客文档，如果文档已存在则创建失败

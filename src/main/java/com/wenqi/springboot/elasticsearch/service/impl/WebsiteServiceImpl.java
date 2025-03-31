@@ -1,8 +1,9 @@
-package com.wenqi.springboot.elasticsearch.service;
+package com.wenqi.springboot.elasticsearch.service.impl;
 
 import com.alibaba.fastjson.JSON;
 import com.wenqi.springboot.elasticsearch.exception.BusinessException;
 import com.wenqi.springboot.elasticsearch.model.Blog;
+import com.wenqi.springboot.elasticsearch.service.IWebsiteService;
 import org.elasticsearch.action.get.GetRequest;
 import org.elasticsearch.action.get.GetResponse;
 import org.elasticsearch.action.index.IndexRequest;
@@ -10,26 +11,21 @@ import org.elasticsearch.action.update.UpdateRequest;
 import org.elasticsearch.action.update.UpdateResponse;
 import org.elasticsearch.client.RequestOptions;
 import org.elasticsearch.client.RestHighLevelClient;
-import org.elasticsearch.common.document.DocumentField;
 import org.elasticsearch.common.xcontent.XContentType;
-import org.elasticsearch.index.get.GetResult;
 import org.elasticsearch.script.Script;
 import org.elasticsearch.script.ScriptType;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.Collections;
-
-import java.io.IOException;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 
 /**
  * 网站服务类，处理博客相关操作
  */
 @Service
-public class WebsiteService {
+public class WebsiteServiceImpl implements IWebsiteService {
 
     @Autowired
     private RestHighLevelClient client;

@@ -34,11 +34,11 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Elasticsearch服务类
+ * Elasticsearch服务实现类
  */
 @Service
 @Slf4j
-public class ElasticsearchService {
+public class ElasticsearchServiceImpl implements IElasticsearchService {
 
     @Autowired
     private RestHighLevelClient client;

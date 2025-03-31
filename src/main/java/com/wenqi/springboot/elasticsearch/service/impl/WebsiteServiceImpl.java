@@ -3,9 +3,14 @@ package com.wenqi.springboot.elasticsearch.service.impl;
 import com.alibaba.fastjson.JSON;
 import com.wenqi.springboot.elasticsearch.exception.BusinessException;
 import com.wenqi.springboot.elasticsearch.model.Blog;
+import com.wenqi.springboot.elasticsearch.model.DocsRequest;
 import com.wenqi.springboot.elasticsearch.service.IWebsiteService;
+import lombok.RequiredArgsConstructor;
 import org.elasticsearch.action.get.GetRequest;
 import org.elasticsearch.action.get.GetResponse;
+import org.elasticsearch.action.get.MultiGetItemResponse;
+import org.elasticsearch.action.get.MultiGetRequest;
+import org.elasticsearch.action.get.MultiGetResponse;
 import org.elasticsearch.action.index.IndexRequest;
 import org.elasticsearch.action.update.UpdateRequest;
 import org.elasticsearch.action.update.UpdateResponse;
@@ -16,19 +21,24 @@ import org.elasticsearch.script.Script;
 import org.elasticsearch.script.ScriptType;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.util.CollectionUtils;
 
+import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * 网站服务类，处理博客相关操作
  */
+@RequiredArgsConstructor
 @Service
 public class WebsiteServiceImpl implements IWebsiteService {
 
-    @Autowired
-    private RestHighLevelClient client;
+    private final RestHighLevelClient client;
 
     private static final String INDEX = "website";
     private static final String TYPE = "blog";
@@ -163,9 +173,9 @@ public class WebsiteServiceImpl implements IWebsiteService {
     /**
      * 通用脚本更新方法
      *
-     * @param id             文档ID
-     * @param scriptContent  脚本内容
-     * @param params         脚本参数
+     * @param id            文档ID
+     * @param scriptContent 脚本内容
+     * @param params        脚本参数
      * @return 更新结果，包含更新状态和版本信息
      */
     public Map<String, Object> updateByScript(String id, String scriptContent, Map<String, Object> params) {
@@ -192,5 +202,53 @@ public class WebsiteServiceImpl implements IWebsiteService {
             }
             throw new BusinessException("脚本更新文档失败", e);
         }
+    }
+
+    @Override
+    public List<Map<String, Object>> mgetByDocs(List<DocsRequest> requests) {
+        try {
+            MultiGetRequest request = new MultiGetRequest();
+            for (DocsRequest docsRequest : requests) {
+                MultiGetRequest.Item item = new MultiGetRequest.Item(docsRequest.getIndex(), docsRequest.getId());
+                if (!CollectionUtils.isEmpty(docsRequest.getFields())) {
+                    item.fetchSourceContext(new org.elasticsearch.search.fetch.subphase.FetchSourceContext(
+                            true,
+                            docsRequest.getFields().toArray(new String[0]),
+                            null
+                    ));
+                }
+                request.add(item);
+            }
+
+            return doMGetResult(request);
+        } catch (Exception e) {
+            throw new BusinessException("批量获取文档失败", e);
+        }
+    }
+
+    @Override
+    public List<Map<String, Object>> mgetByIds(List<String> ids) {
+        try {
+            MultiGetRequest request = new MultiGetRequest();
+            for (String id : ids) {
+                request.add(new MultiGetRequest.Item(INDEX, id));
+            }
+            return doMGetResult(request);
+        } catch (Exception e) {
+            throw new BusinessException("批量获取文档失败", e);
+        }
+    }
+
+    private List<Map<String, Object>> doMGetResult(MultiGetRequest request) throws IOException {
+        MultiGetResponse response = client.mget(request, RequestOptions.DEFAULT);
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (MultiGetItemResponse responseItem : response.getResponses()) {
+            if (!responseItem.isFailed() && responseItem.getResponse().isExists()) {
+                Map<String, Object> sourceAsMap = responseItem.getResponse().getSourceAsMap();
+                sourceAsMap.put("id", responseItem.getResponse().getId());
+                result.add(sourceAsMap);
+            }
+        }
+        return result;
     }
 }

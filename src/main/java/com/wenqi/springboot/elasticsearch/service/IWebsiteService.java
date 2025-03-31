@@ -1,7 +1,9 @@
 package com.wenqi.springboot.elasticsearch.service;
 
 import com.wenqi.springboot.elasticsearch.model.Blog;
+import com.wenqi.springboot.elasticsearch.model.DocsRequest;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -58,4 +60,20 @@ public interface IWebsiteService {
      * @return 更新结果，包含更新状态和版本信息
      */
     Map<String, Object> updateByScript(String id, String scriptContent, Map<String, Object> params);
+
+    /**
+     * 批量获取多个文档
+     *
+     * @param requests 批量请求参数列表
+     * @return 文档列表
+     */
+    List<Map<String, Object>> mgetByDocs(List<DocsRequest> requests);
+
+    /**
+     * 批量获取博客文档（仅通过ID列表）
+     *
+     * @param ids 文档ID列表
+     * @return 文档内容列表
+     */
+    List<Map<String, Object>> mgetByIds(List<String> ids);
 }

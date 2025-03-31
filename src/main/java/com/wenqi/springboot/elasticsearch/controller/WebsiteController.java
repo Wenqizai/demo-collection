@@ -1,6 +1,7 @@
 package com.wenqi.springboot.elasticsearch.controller;
 
 import com.wenqi.springboot.elasticsearch.model.Blog;
+import com.wenqi.springboot.elasticsearch.model.ScriptUpdateRequest;
 import com.wenqi.springboot.elasticsearch.service.WebsiteService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -41,6 +42,30 @@ public class WebsiteController {
     public ResponseResult<String> updateBlog(@PathVariable String id, @RequestBody Blog blog) {
         String documentId = websiteService.updateBlog(id, blog);
         return ResponseResult.success("Blog updated with ID: " + documentId);
+    }
+
+    /**
+     * 根据视图数量条件删除博客文档
+     */
+    @PostMapping("/{id}/_update")
+    public ResponseResult<String> deleteBlogByViewCount(@PathVariable String id, @RequestParam int count) {
+        boolean deleted = websiteService.deleteBlogByViewCount(id, count);
+        if (deleted) {
+            return ResponseResult.success("Blog deleted successfully");
+        } else {
+            return ResponseResult.fail("Failed to delete blog: view count does not match");
+        }
+    }
+
+    /**
+     * 通过脚本更新博客文档
+     */
+    @PostMapping("/{id}/_update_by_script")
+    public ResponseResult<Map<String, Object>> updateBlogByScript(
+            @PathVariable String id,
+            @RequestBody ScriptUpdateRequest request) {
+        Map<String, Object> result = websiteService.updateByScript(id, request.getScript(), request.getParams());
+        return ResponseResult.success(result);
     }
 
     /**

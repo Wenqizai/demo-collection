@@ -1,6 +1,7 @@
 package com.wenqi.springboot.elasticsearch.service;
 
 import com.wenqi.springboot.elasticsearch.model.Blog;
+import com.wenqi.springboot.elasticsearch.model.BulkOperation;
 import com.wenqi.springboot.elasticsearch.model.DocsRequest;
 
 import java.util.List;
@@ -76,4 +77,20 @@ public interface IWebsiteService {
      * @return 文档内容列表
      */
     List<Map<String, Object>> mgetByIds(List<String> ids);
+
+    /**
+     * 执行批量脚本操作
+     *
+     * @param operations 批量操作列表，每个操作包含文档ID和脚本内容
+     * @return 批量操作结果
+     */
+    Map<String, Object> bulkScriptOperations(List<BulkOperation> operations);
+
+    /**
+     * 执行批量REST操作（create、update、delete、index）
+     *
+     * @param operations 批量操作列表
+     * @return 批量操作结果
+     */
+    Map<String, Object> bulkRestOperations(List<BulkOperation> operations);
 }

@@ -3,9 +3,11 @@ package com.wenqi.springboot.elasticsearch.service.impl;
 import com.alibaba.fastjson.JSON;
 import com.wenqi.springboot.elasticsearch.exception.BusinessException;
 import com.wenqi.springboot.elasticsearch.model.Blog;
+import com.wenqi.springboot.elasticsearch.model.BulkOperation;
 import com.wenqi.springboot.elasticsearch.model.DocsRequest;
 import com.wenqi.springboot.elasticsearch.service.IWebsiteService;
 import lombok.RequiredArgsConstructor;
+import org.elasticsearch.action.delete.DeleteRequest;
 import org.elasticsearch.action.get.GetRequest;
 import org.elasticsearch.action.get.GetResponse;
 import org.elasticsearch.action.get.MultiGetItemResponse;
@@ -19,13 +21,14 @@ import org.elasticsearch.client.RestHighLevelClient;
 import org.elasticsearch.common.xcontent.XContentType;
 import org.elasticsearch.script.Script;
 import org.elasticsearch.script.ScriptType;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -250,5 +253,120 @@ public class WebsiteServiceImpl implements IWebsiteService {
             }
         }
         return result;
+    }
+
+    @Override
+    public Map<String, Object> bulkScriptOperations(List<BulkOperation> operations) {
+        try {
+            org.elasticsearch.action.bulk.BulkRequest request = new org.elasticsearch.action.bulk.BulkRequest();
+            
+            for (BulkOperation operation : operations) {
+                UpdateRequest updateRequest = new UpdateRequest(operation.getIndex() != null ? operation.getIndex() : INDEX, operation.getId());
+                
+                // 设置重试次数
+                if (operation.getRetryOnConflict() != null) {
+                    updateRequest.retryOnConflict(operation.getRetryOnConflict());
+                }
+                
+                // 创建脚本
+                Script script = new Script(
+                    ScriptType.INLINE,
+                    "painless",
+                    (String) operation.getSource().get("script"),
+                    (Map<String, Object>) operation.getSource().get("params")
+                );
+                updateRequest.script(script);
+                
+                request.add(updateRequest);
+            }
+            
+            org.elasticsearch.action.bulk.BulkResponse response = client.bulk(request, RequestOptions.DEFAULT);
+            
+            Map<String, Object> result = new HashMap<>();
+            result.put("took", response.getTook().getMillis());
+            result.put("errors", response.hasFailures());
+            result.put("items", Arrays.stream(response.getItems())
+                    .map(item -> {
+                        Map<String, Object> itemResult = new HashMap<>();
+                        itemResult.put("id", item.getId());
+                        itemResult.put("index", item.getIndex());
+                        itemResult.put("status", item.status().getStatus());
+                        if (item.isFailed()) {
+                            itemResult.put("error", item.getFailureMessage());
+                        } else {
+                            itemResult.put("result", item.getResponse().getResult().name());
+                        }
+                        return itemResult;
+                    })
+                    .collect(Collectors.toList()));
+            
+            return result;
+        } catch (Exception e) {
+            throw new BusinessException("批量脚本操作失败", e);
+        }
+    }
+
+    @Override
+    public Map<String, Object> bulkRestOperations(List<BulkOperation> operations) {
+        try {
+            org.elasticsearch.action.bulk.BulkRequest request = new org.elasticsearch.action.bulk.BulkRequest();
+            
+            for (BulkOperation operation : operations) {
+                String index = operation.getIndex() != null ? operation.getIndex() : INDEX;
+                
+                switch (operation.getOperation().toLowerCase()) {
+                    case "create":
+                        request.add(new IndexRequest(index)
+                                .id(operation.getId())
+                                .source(operation.getSource(), XContentType.JSON)
+                                .opType("create"));
+                        break;
+                    case "index":
+                        request.add(new IndexRequest(index)
+                                .id(operation.getId())
+                                .source(operation.getSource(), XContentType.JSON));
+                        break;
+                    case "update":
+                        UpdateRequest updateRequest = new UpdateRequest(index, operation.getId())
+                                .doc(operation.getSource(), XContentType.JSON)
+                                .docAsUpsert(true);
+                        if (operation.getRetryOnConflict() != null) {
+                            updateRequest.retryOnConflict(operation.getRetryOnConflict());
+                        }
+                        request.add(updateRequest);
+                        break;
+                    case "delete":
+                        request.add(new DeleteRequest(index, operation.getId()));
+                        break;
+                    default:
+                        throw new BusinessException("不支持的操作类型: " + operation.getOperation());
+                }
+            }
+            
+            org.elasticsearch.action.bulk.BulkResponse response = client.bulk(request, RequestOptions.DEFAULT);
+            
+            Map<String, Object> result = new HashMap<>();
+            result.put("took", response.getTook().getMillis());
+            result.put("errors", response.hasFailures());
+            result.put("items", Arrays.stream(response.getItems())
+                    .map(item -> {
+                        Map<String, Object> itemResult = new HashMap<>();
+                        itemResult.put("id", item.getId());
+                        itemResult.put("index", item.getIndex());
+                        itemResult.put("operation", item.getOpType());
+                        itemResult.put("status", item.status().getStatus());
+                        if (item.isFailed()) {
+                            itemResult.put("error", item.getFailureMessage());
+                        } else {
+                            itemResult.put("result", item.getResponse().getResult().name());
+                        }
+                        return itemResult;
+                    })
+                    .collect(Collectors.toList()));
+            
+            return result;
+        } catch (Exception e) {
+            throw new BusinessException("批量REST操作失败", e);
+        }
     }
 }

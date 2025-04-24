@@ -28,6 +28,11 @@ public interface IElasticsearchService {
      * 添加/更新文档
      */
     String addDocument(String index, String id, Object document);
+    
+    /**
+     * 添加/更新文档(指定路由)
+     */
+    String addDocument(String index, String id, Object document, String routing);
 
     /**
      * 批量添加文档
@@ -38,19 +43,44 @@ public interface IElasticsearchService {
      * 获取文档
      */
     Map<String, Object> getDocument(String index, String id);
+    
+    /**
+     * 获取文档(指定路由)
+     */
+    Map<String, Object> getDocument(String index, String id, String routing);
+    
+    /**
+     * 批量获取文档(支持路由)
+     */
+    List<Map<String, Object>> mgetDocuments(String index, List<String> ids, List<String> routings);
 
     /**
      * 更新文档
      */
     boolean updateDocument(String index, String id, Object document);
+    
+    /**
+     * 更新文档(指定路由)
+     */
+    boolean updateDocument(String index, String id, Object document, String routing);
 
     /**
      * 删除文档
      */
     boolean deleteDocument(String index, String id);
+    
+    /**
+     * 删除文档(指定路由)
+     */
+    boolean deleteDocument(String index, String id, String routing);
 
     /**
      * 搜索文档
      */
     <T> List<T> search(String index, QueryBuilder queryBuilder, Class<T> clazz);
+    
+    /**
+     * 搜索文档(指定路由)
+     */
+    <T> List<T> search(String index, QueryBuilder queryBuilder, Class<T> clazz, String routing);
 }

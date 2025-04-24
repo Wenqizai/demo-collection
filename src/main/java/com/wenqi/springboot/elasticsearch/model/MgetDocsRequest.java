@@ -24,4 +24,9 @@ public class MgetDocsRequest {
      * 需要获取的字段列表
      */
     private List<Set<String>> fields;
+    
+    /**
+     * 路由值列表，与文档ID一一对应
+     */
+    private List<String> routings;
 }

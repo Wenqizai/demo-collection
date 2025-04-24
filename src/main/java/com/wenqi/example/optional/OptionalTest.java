@@ -1,7 +1,8 @@
 package com.wenqi.example.optional;
 
 
-import javafx.util.Pair;
+
+import cn.hutool.core.lang.Pair;
 
 import java.util.Optional;
 

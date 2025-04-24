@@ -25,4 +25,9 @@ public class DocsRequest {
      * 需要获取的字段集合
      */
     private Set<String> fields;
+
+    /**
+     * 路由值
+     */
+    private String routing;
 }

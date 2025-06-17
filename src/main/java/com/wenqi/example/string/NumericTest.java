@@ -1,4 +1,4 @@
-package com.wenqi.string;
+package com.wenqi.example.string;
 
 /**
  * @author liangwenqi

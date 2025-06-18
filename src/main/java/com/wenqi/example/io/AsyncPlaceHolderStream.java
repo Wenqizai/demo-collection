@@ -19,10 +19,12 @@ import java.util.concurrent.CompletableFuture;
 public class AsyncPlaceHolderStream {
     public static void main(String[] args) {
         AsyncPlaceHolderStream asyncPlaceHolderStream = new AsyncPlaceHolderStream();
+        long start = System.currentTimeMillis();
         test01(asyncPlaceHolderStream);
 
         // 可以读到 11111111，流等待 10 分钟后关闭
-//        asyncStream.downloadDataWithPlaceholderInputStream();
+//        asyncPlaceHolderStream.downloadDataWithPlaceholderInputStream();
+        System.out.println("耗时: " + (System.currentTimeMillis() - start) + "ms");
     }
 
     /**
@@ -30,7 +32,7 @@ public class AsyncPlaceHolderStream {
      */
     private static void test01(AsyncPlaceHolderStream asyncPlaceHolderStream) {
         asyncPlaceHolderStream.downloadDataWithInputStream();
-        ThreadUtil.sleep(20 * 1000);
+        ThreadUtil.sleep(20 * 1000L);
     }
 
     /**
@@ -99,7 +101,7 @@ public class AsyncPlaceHolderStream {
         try {
             fos.write(txt.getBytes());
             fos.flush();
-            Thread.sleep(10 * 1000);
+            Thread.sleep(10 * 1000L);
 
             fos.write(txt.getBytes());
             fos.flush();
@@ -121,12 +123,10 @@ public class AsyncPlaceHolderStream {
             e.printStackTrace();
         }
 
-        if (fis != null) {
-            try {
-                fis.close();
-            } catch (IOException e) {
-                throw new IllegalStateException("File导出失败: " + e.getMessage(), e);
-            }
+        try {
+            fis.close();
+        } catch (IOException e) {
+            throw new IllegalStateException("File导出失败: " + e.getMessage(), e);
         }
     }
 

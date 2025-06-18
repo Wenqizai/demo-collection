@@ -1,5 +1,9 @@
 package com.wenqi.example.io;
 
+import org.jetbrains.annotations.NotNull;
+
+import java.io.BufferedInputStream;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 
@@ -17,6 +21,7 @@ import java.io.InputStream;
  * - 避免了PipedInputStream的缓冲区限制
  * - 确保数据完整性，不会出现提前关闭问题
  * - 支持大文件导出，内存占用可控
+ * - 自动检测并添加缓冲，提升读取性能
  * 异步 PlaceholderInputStream，防止流被提前关闭
  * @author liangwenqi
  * @date 2025/6/17
@@ -29,7 +34,7 @@ public class PlaceholderInputStream extends InputStream {
 
     public void setActualStream(InputStream actualStream) {
         synchronized (lock) {
-            this.actualStream = actualStream;
+            this.actualStream = wrapWithBufferIfNeeded(actualStream);
             lock.notifyAll();
         }
     }
@@ -48,7 +53,7 @@ public class PlaceholderInputStream extends InputStream {
     }
 
     @Override
-    public int read(byte[] b, int off, int len) throws IOException {
+    public int read(@NotNull byte[] b, int off, int len) throws IOException {
         waitForActualStream();
         return actualStream.read(b, off, len);
     }
@@ -63,25 +68,80 @@ public class PlaceholderInputStream extends InputStream {
         }
     }
 
+    /**
+     * 检测输入流是否已经有缓冲，如果没有则用BufferedInputStream包装
+     * 这可以显著提升读取性能，特别是对于频繁的小块读取操作
+     *
+     * @param inputStream 原始输入流
+     * @return 带缓冲的输入流
+     */
+    private InputStream wrapWithBufferIfNeeded(InputStream inputStream) {
+        if (inputStream == null) {
+            return null;
+        }
+
+        // 检查是否已经是缓冲流或其他高性能流
+        if (isBufferedStream(inputStream)) {
+            return inputStream;
+        }
+
+        // 用BufferedInputStream包装，使用默认8192字节缓冲区
+        return new BufferedInputStream(inputStream);
+    }
+
+    /**
+     * 判断输入流是否已经具有缓冲功能
+     *
+     * @param inputStream 要检查的输入流
+     * @return true 如果流已经有缓冲功能
+     */
+    private boolean isBufferedStream(InputStream inputStream) {
+        // BufferedInputStream 已经有缓冲
+        if (inputStream instanceof BufferedInputStream) {
+            return true;
+        }
+
+        // ByteArrayInputStream 在内存中，不需要额外缓冲
+        if (inputStream instanceof ByteArrayInputStream) {
+            return true;
+        }
+
+        // 一些其他已知的高性能流类型
+        String className = inputStream.getClass().getSimpleName();
+        return className.contains("Buffered") ||
+               className.contains("ByteArray") ||
+               className.contains("String") ||
+               className.equals("PushbackInputStream"); // PushbackInputStream 通常已经有缓冲
+    }
+
     private void waitForActualStream() throws IOException {
         synchronized (lock) {
+            long timeoutMs = 10 * 60 * 1000L; // 10分钟超时
+            long startTime = System.currentTimeMillis();
+
             while (actualStream == null && error == null) {
+                long remainingTime = timeoutMs - (System.currentTimeMillis() - startTime);
+
+                if (remainingTime <= 0) {
+                    throw new IOException("等待数据流超时（10分钟），请稍后重试");
+                }
+
                 try {
-                    // 等待真正的流准备好或出错
-                    lock.wait(10 * 1000 * 60); // 最多等待10分钟
+                    // 等待真正的流准备好或出错，使用剩余时间作为超时
+                    lock.wait(remainingTime);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
-                    throw new IOException("等待Excel数据流时被中断", e);
+                    throw new IOException("等待数据流时被中断", e);
                 }
+
+                // 循环会重新检查条件，处理虚假唤醒
             }
 
             if (error != null) {
-                throw new IOException("Excel生成失败", error);
+                throw new IOException("数据流生成失败", error);
             }
 
-            if (actualStream == null) {
-                throw new IOException("Excel数据流生成超时，请稍后重试");
-            }
+            // 此时 actualStream 必定不为 null，因为循环条件保证了这一点
         }
     }
 

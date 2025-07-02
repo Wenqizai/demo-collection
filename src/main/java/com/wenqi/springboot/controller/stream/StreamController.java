@@ -46,12 +46,17 @@ import java.nio.file.Files;
 public class StreamController {
     private static final Logger LOGGER = LoggerFactory.getLogger(StreamController.class);
 
-    private static final String TEMP_PATH = "C://temp//";
-    private static final String TEMP_FILE = TEMP_PATH + "test.txt";
+    private static final String TEMP_PATH = "/temp";
+    private static final String TEMP_FILE = TEMP_PATH + "/test.txt";
+    private volatile boolean initFlag = false;
 
-    static {
+
+    private void init() {
+        if (initFlag) {
+            return;
+        }
         // 文件大小（以字节为单位）
-        long fileSize = 100 * 1024 * 1024; // 100MB
+        long fileSize = 100 * 1024 * 1024L; // 100MB
 
         // 创建文件对象
         File file = new File(TEMP_FILE);
@@ -80,17 +85,17 @@ public class StreamController {
                     remaining -= toWrite;
                 }
 
-               LOGGER.info("文件已成功创建并填充到 100MB。");
+                LOGGER.info("文件已成功创建并填充到 100MB。");
             } catch (IOException e) {
                 LOGGER.error("无法写入文件", e);
             }
         }
-
+        initFlag = true;
     }
-
 
     @PostMapping(value = "/postRequestUseHttpClient")
     Integer postRequestNotStream() {
+        init();
         try (CloseableHttpClient httpclient = HttpClients.createDefault()) {
             // 要上传的文件
             File file = new File(TEMP_FILE); // 请根据需要修改文件路径
@@ -117,6 +122,7 @@ public class StreamController {
 
     @PostMapping(value = "/postRequestUseRestTemplate")
     Integer postRequestUseStream(Reader reader) {
+        init();
         // 要上传的文件
         File file = new File(TEMP_FILE); // 请根据需要修改文件路径
 
@@ -153,6 +159,7 @@ public class StreamController {
 
     @PostMapping(value = "/uploadSave")
     Integer uploadFile(@RequestPart(value = "file") MultipartFile file) {
+        init();
         // 生成保存文件的路径
         File saveFile = new File(TEMP_PATH + System.currentTimeMillis() + "-" + file.getOriginalFilename());
 

@@ -19,7 +19,20 @@
         <maven.compiler.target>1.8</maven.compiler.target>
         <testable.version>0.7.7</testable.version>
         <elasticsearch.version>7.2.0</elasticsearch.version>
+        <spring-cloud.version>Hoxton.SR8</spring-cloud.version>
     </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.springframework.cloud</groupId>
+                <artifactId>spring-cloud-dependencies</artifactId>
+                <version>${spring-cloud.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <dependencies>
         <!-- Elasticsearch -->
@@ -34,14 +47,7 @@
             <version>${elasticsearch.version}</version>
         </dependency>
 
-        <!-- https://mvnrepository.com/artifact/org.springframework.cloud/spring-cloud-dependencies -->
-        <dependency>
-            <groupId>org.springframework.cloud</groupId>
-            <artifactId>spring-cloud-dependencies</artifactId>
-            <version>Hoxton.SR8</version>
-            <type>pom</type>
-            <scope>import</scope>
-        </dependency>
+        <!-- Spring Cloud dependencies moved to dependencyManagement section -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
@@ -171,21 +177,18 @@
             <artifactId>fastjson</artifactId>
             <version>2.0.32</version>
         </dependency>
+        <!-- Jackson dependencies managed by Spring Boot -->
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-core</artifactId>
-            <version>2.11.1</version>
         </dependency>
-
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-annotations</artifactId>
-            <version>2.11.1</version>
         </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
-            <version>2.14.2</version>
         </dependency>
         <!-- https://mvnrepository.com/artifact/com.spring4all/swagger-spring-boot-starter -->
 <!--        <dependency>-->

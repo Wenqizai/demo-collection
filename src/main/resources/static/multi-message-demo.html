@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>多消息长轮询演示</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .button-group {
+            margin: 10px 0;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            margin: 5px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+        }
+        .result {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 10px 0;
+            min-height: 100px;
+            white-space: pre-wrap;
+            font-family: monospace;
+        }
+        .loading {
+            color: #007bff;
+            font-style: italic;
+        }
+        .error {
+            color: #dc3545;
+        }
+        .success {
+            color: #28a745;
+        }
+        .input-group {
+            margin: 10px 0;
+        }
+        .input-group label {
+            display: inline-block;
+            width: 120px;
+            font-weight: bold;
+        }
+        .input-group input {
+            padding: 5px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            width: 100px;
+        }
+        .sse-messages {
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid #ccc;
+            padding: 10px;
+            background: #f8f9fa;
+        }
+        .sse-message {
+            margin: 5px 0;
+            padding: 5px;
+            background: white;
+            border-radius: 3px;
+            border-left: 3px solid #007bff;
+        }
+    </style>
+</head>
+<body>
+    <h1>多消息长轮询演示</h1>
+    
+    <!-- 方案1：时间窗口收集 -->
+    <div class="container">
+        <h2>方案1：时间窗口内收集多条消息</h2>
+        <p>在指定时间窗口内收集所有到达的消息，时间到或达到最大数量后返回。</p>
+        
+        <div class="input-group">
+            <label>时间窗口(ms):</label>
+            <input type="number" id="windowMs" value="3000" min="1000" max="10000">
+        </div>
+        <div class="input-group">
+            <label>最大消息数:</label>
+            <input type="number" id="maxCount" value="5" min="1" max="20">
+        </div>
+        
+        <div class="button-group">
+            <button onclick="getMultiMessages()">开始收集消息</button>
+        </div>
+        
+        <div id="multiResult" class="result">点击按钮开始收集消息...</div>
+    </div>
+    
+    <!-- 方案2：批量收集 -->
+    <div class="container">
+        <h2>方案2：批量消息收集</h2>
+        <p>收集到指定数量的消息后立即返回，不等待时间窗口结束。</p>
+        
+        <div class="input-group">
+            <label>批次大小:</label>
+            <input type="number" id="batchSize" value="3" min="1" max="10">
+        </div>
+        <div class="input-group">
+            <label>超时时间(ms):</label>
+            <input type="number" id="timeoutMs" value="5000" min="1000" max="15000">
+        </div>
+        
+        <div class="button-group">
+            <button onclick="getBatchMessages()">开始批量收集</button>
+        </div>
+        
+        <div id="batchResult" class="result">点击按钮开始批量收集...</div>
+    </div>
+    
+    <!-- 方案3：SSE流式推送 -->
+    <div class="container">
+        <h2>方案3：Server-Sent Events 实时推送</h2>
+        <p>使用SSE技术实时推送消息，支持持续接收多条消息。</p>
+        
+        <div class="input-group">
+            <label>推送时长(秒):</label>
+            <input type="number" id="duration" value="10" min="5" max="30">
+        </div>
+        
+        <div class="button-group">
+            <button onclick="startSSE()" id="sseBtn">开始SSE推送</button>
+            <button onclick="stopSSE()" id="stopBtn" disabled>停止推送</button>
+        </div>
+        
+        <div id="sseResult" class="sse-messages">点击按钮开始SSE推送...</div>
+    </div>
+
+    <script>
+        let eventSource = null;
+        
+        // 方案1：时间窗口收集
+        async function getMultiMessages() {
+            const windowMs = document.getElementById('windowMs').value;
+            const maxCount = document.getElementById('maxCount').value;
+            const resultDiv = document.getElementById('multiResult');
+            
+            resultDiv.innerHTML = '<span class="loading">正在收集消息...</span>';
+            resultDiv.className = 'result loading';
+            
+            try {
+                const response = await fetch(`/msg/getMultiMsg?windowMs=${windowMs}&maxCount=${maxCount}`);
+                const messages = await response.json();
+                
+                resultDiv.innerHTML = `收集到 ${messages.length} 条消息:\n${JSON.stringify(messages, null, 2)}`;
+                resultDiv.className = 'result success';
+            } catch (error) {
+                resultDiv.innerHTML = `错误: ${error.message}`;
+                resultDiv.className = 'result error';
+            }
+        }
+        
+        // 方案2：批量收集
+        async function getBatchMessages() {
+            const batchSize = document.getElementById('batchSize').value;
+            const timeoutMs = document.getElementById('timeoutMs').value;
+            const resultDiv = document.getElementById('batchResult');
+            
+            resultDiv.innerHTML = '<span class="loading">正在批量收集消息...</span>';
+            resultDiv.className = 'result loading';
+            
+            try {
+                const response = await fetch(`/msg/getBatchMsg?batchSize=${batchSize}&timeoutMs=${timeoutMs}`);
+                const messages = await response.json();
+                
+                resultDiv.innerHTML = `批量收集到 ${messages.length} 条消息:\n${JSON.stringify(messages, null, 2)}`;
+                resultDiv.className = 'result success';
+            } catch (error) {
+                resultDiv.innerHTML = `错误: ${error.message}`;
+                resultDiv.className = 'result error';
+            }
+        }
+        
+        // 方案3：SSE推送
+        function startSSE() {
+            const duration = document.getElementById('duration').value;
+            const resultDiv = document.getElementById('sseResult');
+            const sseBtn = document.getElementById('sseBtn');
+            const stopBtn = document.getElementById('stopBtn');
+            
+            resultDiv.innerHTML = '';
+            sseBtn.disabled = true;
+            stopBtn.disabled = false;
+            
+            eventSource = new EventSource(`/msg/getStreamMsg?duration=${duration}`);
+            
+            eventSource.onopen = function() {
+                addSSEMessage('连接已建立，开始接收消息...', 'info');
+            };
+            
+            eventSource.addEventListener('message', function(event) {
+                addSSEMessage(`消息: ${event.data}`, 'message');
+            });
+            
+            eventSource.addEventListener('complete', function(event) {
+                addSSEMessage(`推送完成: ${event.data}`, 'complete');
+                stopSSE();
+            });
+            
+            eventSource.onerror = function(event) {
+                addSSEMessage('连接错误或已关闭', 'error');
+                stopSSE();
+            };
+        }
+        
+        function stopSSE() {
+            if (eventSource) {
+                eventSource.close();
+                eventSource = null;
+            }
+            
+            document.getElementById('sseBtn').disabled = false;
+            document.getElementById('stopBtn').disabled = true;
+            addSSEMessage('SSE连接已关闭', 'info');
+        }
+        
+        function addSSEMessage(message, type) {
+            const resultDiv = document.getElementById('sseResult');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `sse-message ${type}`;
+            messageDiv.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            resultDiv.appendChild(messageDiv);
+            resultDiv.scrollTop = resultDiv.scrollHeight;
+        }
+    </script>
+</body>
+</html>
